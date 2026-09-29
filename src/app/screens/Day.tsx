@@ -1,6 +1,9 @@
+// Day tab: a Day | Week | Month switch (remembered in localStorage; the route stays '#/day[/YYYY-MM-DD]').
 // Day: the 24-hour ribbon for one date. Header with prev/next and a Today pill, a category strip, then a
 // 1 px = 1 minute timeline with tappable blocks (detail sheet; manual blocks can be edited or deleted) and hatched
 // Unknown gaps (Fill sheet -> a time_blocks row through the outbox, patched in optimistically).
+// Week and Month (M7) live in ./day/Week.tsx and ./day/Month.tsx and read /api/summary.
+import type { ComponentChildren } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Block, Gap } from '@shared/day'
 import { CATEGORY_LABELS } from '@shared/day'
@@ -16,6 +19,10 @@ import { localToday, now, syncState } from '../data/store'
 import { dayHash, dayState, loadDay, watchDay, type DayPayload } from '../data/day'
 import { SHORT_LABELS, blockColor, gapNeighbours, hm, minuteOf, ringSummary, stripSegments, titleCase, toBlockCategory } from '../data/daymath'
 import * as outbox from '../data/outbox'
+import { ViewSwitch, readView, saveView, type View } from './day/shared'
+import { WeekView } from './day/Week'
+import { MonthView } from './day/Month'
+import '../styles/summary.css'
 
 const LABEL_MIN_PX = 28
 const MORNING_MIN = 7 * 60
@@ -27,6 +34,15 @@ export function Day() {
   const r = route.value
   const todayStr = localToday.value
   const date = r.name === 'day' && r.date ? r.date : todayStr
+  const [view, setView] = useState<View>(readView)
+  const change = (v: View) => { saveView(v); setView(v) }
+  const switcher = <ViewSwitch view={view} onChange={change} />
+  if (view === 'week') return <WeekView date={date} today={todayStr} switcher={switcher} />
+  if (view === 'month') return <MonthView date={date} today={todayStr} switcher={switcher} onOpenDay={(d) => { change('day'); navigate(dayHash(d)) }} />
+  return <DayView date={date} todayStr={todayStr} switcher={switcher} />
+}
+
+function DayView({ date, todayStr, switcher }: { date: string; todayStr: string; switcher: ComponentChildren }) {
   const state = dayState(date).value
   const data = state.data
   const isToday = date === todayStr
@@ -62,6 +78,7 @@ export function Day() {
           </button>
           <SyncDot />
         </div>
+        <div class="view-row">{switcher}</div>
       </header>
       <main class="content fade day-content">
         {(sync === 'no-token' || sync === 'unauthorized') && (

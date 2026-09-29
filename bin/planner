@@ -23,7 +23,7 @@ const USAGE = `planner - CLI for the planner Worker
 
 Usage: planner <command> [options]
 
-Available now (milestones 1-2):
+Available now (milestones 1-2, 7):
   me                      validate the token; prints role, tz, server time, today
   health                  liveness (/api/health) + automation health rows
   today [--json]          pretty-print today: routine state, sleep, streak, running timers, health
@@ -32,12 +32,17 @@ Available now (milestones 1-2):
                           date = YYYY-MM-DD | today (default) | yesterday, in the server's timezone
   tap <item> [--at ISO]   POST /api/tap as the app role (shower|run|stretch|shoulders|journal|bed|wake|winddown)
   taps [--json]           last 100 tap_log rows (newest first)
+  rollup [day] [--json]   rebuild one day's day_summary row now (POST /api/rollup) and print it
+                          date = YYYY-MM-DD | today | yesterday (default)
+  export [--out FILE]     GET /api/export -> a JSON dump of every table (default ~/planner-backups/export-<date>.json)
+  screentime phone --day YYYY-MM-DD --hours '{"7":12,"8":45,...}' [--device NAME] [--dry-run]
+                          local hours -> UTC '_total' rows for that day, POST /api/screentime as the app role
+                          (source 'phone'); --dry-run prints the body instead of posting it
   config [--url URL]      show or set the Worker URL in ~/.config/planner/config.json
 
 Arriving in later milestones (exit 2 for now):
   food add --json         (M3)   food search <q>     (M3)   eat ...        (M3)   block add ...  (M3)
   session add ...         (M5)   set add ...         (M5)
-  rollup [day]            (M7)   export              (M7)   screentime phone --day --hours '{...}'  (M8)
 
 Global: --json prints the raw API response. --help / -h prints this.
 Token: PLANNER_TOKEN env or Keychain item "${KEYCHAIN_SERVICE}" (security add-generic-password -U -a "$USER" -s ${KEYCHAIN_SERVICE} -w).
@@ -46,14 +51,12 @@ Token: PLANNER_TOKEN env or Keychain item "${KEYCHAIN_SERVICE}" (security add-ge
 const LATER = {
   'food add': 3, 'food search': 3, eat: 3, 'block add': 3,
   'session add': 5, 'set add': 5,
-  rollup: 7, export: 7,
-  'screentime phone': 8,
 }
 
 // ---------------------------------------------------------------- args
 
 // Flags that never take a value, so `planner day --json yesterday` keeps "yesterday" as a positional.
-const BOOL_FLAGS = new Set(['json', 'help'])
+const BOOL_FLAGS = new Set(['json', 'help', 'dry-run'])
 
 function parseArgs(argv) {
   const positional = []
@@ -419,6 +422,128 @@ async function cmdDay(positional, flags) {
   console.log(out.join('\n'))
 }
 
+// ---- rollup: POST /api/rollup {day} -> the day_summary row, printed as a small table.
+
+function printSummary(s, indent = '  ') {
+  const rows = [[`${indent}category`, 'h m']]
+  for (const [name, key] of [['sleep', 'sleep_s'], ['workout', 'workout_s'], ['study', 'study_s'], ['routine', 'routine_s'], ['mac', 'mac_s'], ['phone', 'phone_s'], ['manual', 'manual_s'], ['unknown', 'unknown_s']]) {
+    const v = Number(s[key]) || 0
+    if (v <= 0 && name !== 'unknown') continue
+    rows.push([`${indent}${name}`, hms(v)])
+  }
+  rows.push([`${indent}tracked`, hms(s.tracked_s)])
+  const out = [table(rows)]
+  const maps = [['manual', s.manual_by_category], ['study (raw)', s.study_by_project], ['mac (raw)', s.mac_by_category]]
+  for (const [label, map] of maps) {
+    const entries = Object.entries(map || {}).sort((a, b) => Number(b[1]) - Number(a[1]))
+    if (entries.length) out.push(`${indent}${label}: ${entries.map(([k, v]) => `${k} ${hms(v)}`).join(', ')}`)
+  }
+  const food = s.kcal == null ? 'no food logged' : `${Math.round(s.kcal)} kcal · P ${Math.round(s.protein_g || 0)} C ${Math.round(s.carb_g || 0)} F ${Math.round(s.fat_g || 0)}`
+  out.push(`${indent}food: ${food}`)
+  out.push(`${indent}lift: ${s.sets_count} sets, volume ${s.volume}  ·  sessions: ${s.sessions_count}  ·  routine: ${s.routine_done}/${s.routine_total}`)
+  out.push(`${indent}bed: ${s.bed_late_min == null ? 'no bed tap that night' : `${signed(s.bed_late_min)} min vs target`}  ·  final: ${s.final ? 'yes' : 'no'}  ·  computed ${s.computed_at || '-'}`)
+  return out.join('\n')
+}
+
+async function cmdRollup(positional, flags) {
+  const day = await resolveDay(positional[0] ?? 'yesterday')
+  const { data } = await api('POST', '/api/rollup', { body: { day } })
+  if (flags.json) return console.log(JSON.stringify(data, null, 2))
+  if (!data || !data.summary) throw new Error('POST /api/rollup: unexpected response (no summary)')
+  console.log(`Rebuilt ${data.day}`)
+  console.log(printSummary(data.summary))
+}
+
+// ---- export: GET /api/export -> one JSON file (never printed to the terminal; it can be large).
+
+function localDateStamp() {
+  const p = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
+  const g = (t) => p.find((x) => x.type === t)?.value ?? '00'
+  return `${g('year')}-${g('month')}-${g('day')}`
+}
+
+async function cmdExport(flags) {
+  const out = typeof flags.out === 'string' && flags.out ? flags.out : join(homedir(), 'planner-backups', `export-${localDateStamp()}.json`)
+  const { data } = await api('GET', '/api/export')
+  if (!data || typeof data !== 'object' || !data.tables) throw new Error('GET /api/export: unexpected response (no tables)')
+  await mkdir(join(out, '..'), { recursive: true, mode: 0o700 })
+  const text = JSON.stringify(data, null, 1) + '\n'
+  await writeFile(out, text, { mode: 0o600 })
+  if (flags.json) return console.log(JSON.stringify({ file: out, bytes: Buffer.byteLength(text), exported_at: data.exported_at, counts: data.counts, truncated: data.truncated, row_cap: data.row_cap }, null, 2))
+  console.log(`wrote ${out} (${(Buffer.byteLength(text) / 1024).toFixed(0)} KB, exported ${data.exported_at})`)
+  const counts = data.counts || {}
+  console.log(table(Object.keys(counts).map((t) => [`  ${t}`, String(counts[t])])))
+  if (Array.isArray(data.truncated) && data.truncated.length) console.log(`  note: capped at ${data.row_cap} rows per table; truncated: ${data.truncated.join(', ')}`)
+}
+
+// ---- screentime phone: local hours -> UTC '_total' rows -> POST /api/screentime (source 'phone').
+
+/** Offset (ms) such that instant + offset == the wall clock in tz (same algorithm as src/shared/tz.ts). */
+function tzOffsetMs(date, tz) {
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(date)
+  const g = (t) => Number(p.find((x) => x.type === t)?.value ?? '0')
+  const h = g('hour') === 24 ? 0 : g('hour')
+  return Date.UTC(g('year'), g('month') - 1, g('day'), h, g('minute'), g('second')) - Math.floor(date.getTime() / 1000) * 1000
+}
+/** UTC instant of a wall-clock hour in tz, correct across DST changes. */
+function zonedToUTC(day, hour, tz) {
+  const [y, m, d] = day.split('-').map(Number)
+  const guess = Date.UTC(y, m - 1, d, hour, 0, 0)
+  const off = tzOffsetMs(new Date(guess), tz)
+  let inst = guess - off
+  const off2 = tzOffsetMs(new Date(inst), tz)
+  if (off2 !== off) inst = guess - off2
+  return new Date(inst)
+}
+
+function parseHours(raw) {
+  let obj
+  try { obj = JSON.parse(raw) } catch (e) { throw usage(`--hours must be JSON like '{"7":12,"8":45}': ${e.message}`) }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw usage('--hours must be a JSON object of local hour -> minutes')
+  const hours = []
+  for (const [k, v] of Object.entries(obj)) {
+    const h = Number(k)
+    if (!Number.isInteger(h) || h < 0 || h > 23) throw usage(`--hours: "${k}" is not a local hour 0-23`)
+    const min = Number(v)
+    if (!Number.isFinite(min) || min < 0 || min > 60) throw usage(`--hours: hour ${k} has ${JSON.stringify(v)} minutes (want 0-60)`)
+    hours.push([h, min])
+  }
+  if (!hours.length) throw usage('--hours has no hours in it; nothing to post (an empty push never wipes data)')
+  return hours.sort((a, b) => a[0] - b[0])
+}
+
+async function cmdScreentimePhone(flags) {
+  const day = typeof flags.day === 'string' ? flags.day.trim() : ''
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw usage('screentime phone needs --day YYYY-MM-DD')
+  if (typeof flags.hours !== 'string') throw usage('screentime phone needs --hours \'{"7":12,"8":45}\' (local hour -> minutes)')
+  const hours = parseHours(flags.hours)
+  const device = typeof flags.device === 'string' && flags.device ? flags.device : 'iPhone'
+  // The server's timezone decides which UTC hour a local hour is; --tz only exists for --dry-run without a server.
+  let tz = typeof flags.tz === 'string' && flags.tz ? flags.tz : null
+  if (!tz) {
+    const me = (await api('GET', '/api/me')).data
+    tz = me && typeof me.tz === 'string' ? me.tz : null
+    if (!tz) throw new Error('/api/me did not say what the timezone is')
+  }
+  const rows = hours.map(([h, min]) => ({ hour_start: zonedToUTC(day, h, tz).toISOString(), app_id: '_total', seconds: Math.min(3600, Math.round(min * 60)) }))
+  const body = {
+    source: 'phone', device,
+    window: { from: zonedToUTC(day, 0, tz).toISOString(), to: zonedToUTC(shiftDay(day, 1), 0, tz).toISOString() },
+    hours: rows,
+  }
+  const total = hours.reduce((a, [, m]) => a + m, 0)
+  if (flags['dry-run']) {
+    console.log(JSON.stringify(body, null, 2))
+    console.error(`dry run: ${rows.length} hour rows, ${hm(Math.round(total))} total on ${day} (${tz}); nothing posted`)
+    return
+  }
+  const { data } = await api('POST', '/api/screentime', { body })
+  if (flags.json) return console.log(JSON.stringify(data, null, 2))
+  const n = (k, d) => (data && data[k] != null ? data[k] : d)
+  const days = data && Array.isArray(data.days) && data.days.length ? ` · days marked for rollup: ${data.days.join(', ')}` : ''
+  console.log(`ok: ${day} (${tz}) · ${n('hours', rows.length)} hours (${hm(Math.round(total))} on the phone), ${n('intervals', 0)} intervals, ${n('apps_new', 0)} new apps${days}`)
+}
+
 // ---------------------------------------------------------------- dispatch
 
 function usage(msg) { const e = new Error(msg); e.usage = true; return e }
@@ -442,6 +567,11 @@ async function main() {
     case 'day': return cmdDay(positional.slice(1), flags)
     case 'tap': return cmdTap(positional.slice(1), flags)
     case 'taps': return cmdTaps(flags)
+    case 'rollup': return cmdRollup(positional.slice(1), flags)
+    case 'export': return cmdExport(flags)
+    case 'screentime':
+      if (positional[1] === 'phone') return cmdScreentimePhone(flags)
+      throw usage(`screentime wants "phone", got "${positional[1] ?? ''}"`)
     default:
       throw usage(`unknown command: ${cmd}`)
   }

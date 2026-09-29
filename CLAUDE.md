@@ -63,7 +63,7 @@ from `~/.config/planner/config.json` (`{"url": "..."}`, or `PLANNER_URL`) and th
 `PLANNER_TOKEN`). Exit codes: 0 ok, 1 network/auth/server error, 2 usage or "not available until milestone N".
 Add `--json` when you need to parse the response instead of the pretty text.
 
-Available now (milestones 1-2):
+Available now (milestones 1-2 and 7):
 
 | Command | Use it to |
 |---|---|
@@ -73,10 +73,13 @@ Available now (milestones 1-2):
 | `planner health` | liveness and the automation_health rows (Mac push, NFC, cron) |
 | `planner tap <item> [--at ISO]` | log a routine/bed/wake tap as the app role (same state machine as the stickers) |
 | `planner taps` | last 100 tap_log rows to debug a sticker that "did nothing" |
+| `planner rollup [YYYY-MM-DD\|today\|yesterday]` | (M7) rebuild one day's `day_summary` row now (`POST /api/rollup`) and print it: category totals, food, sets/volume, sessions, routine done/total, bed late minutes, final. Default `yesterday`. Use it when the Week view shows a stale day or after a bulk edit |
+| `planner export [--out FILE]` | (M7) `GET /api/export` -> a JSON dump of every table (default `~/planner-backups/export-<date>.json`, capped at 20k rows per table; the file lists which tables were truncated). Never prints the data or the token |
+| `planner screentime phone --day YYYY-MM-DD --hours '{"7":12,"8":45}' [--dry-run]` | (M7) post a day of iPhone usage read from a Screen Time screenshot: local hours -> UTC `_total` rows, `POST /api/screentime` as the app role (source `phone`, device `iPhone`). `--dry-run` prints the body instead of posting; the recipe below says when to use it |
 | `planner config --url URL` | first-time setup |
 
 Later milestones (they exist as stubs that exit 2 until then): `food add --json`, `food search`, `eat`,
-`block add` (M3); `session add`, `set add` (M5); `rollup`, `export` (M7); `screentime phone` (M8).
+`block add` (M3); `session add`, `set add` (M5).
 
 When the user asks how today is going, run `planner today`. When they ask how yesterday (or any day) went, run
 `planner day yesterday` / `planner day YYYY-MM-DD` and answer from its output; never guess. Reading that output:
