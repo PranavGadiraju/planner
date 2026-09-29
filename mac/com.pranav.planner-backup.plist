@@ -3,7 +3,10 @@
 <!--
   planner: weekly D1 backup (mac/backup.sh) -> ~/planner-backups/<date>.sql
   Installed by mac/install.sh, which replaces __HOME__ and __REPO__ and copies this file to ~/Library/LaunchAgents/.
-  Runs Sundays at 09:30 local time; RunAtLoad makes the first backup happen right after loading.
+  Runs Sundays at 09:30 local time, and only then: deliberately no RunAtLoad, because a D1 export at every
+  login would be wrong. Loading the agent exports nothing; for a first backup use "Run now" below or
+  `sh mac/backup.sh`. launchd runs a missed calendar slot when the Mac wakes, so a Mac asleep at 09:30 still
+  gets its weekly dump.
 
   Load:     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.pranav.planner-backup.plist
   Run now:  launchctl kickstart -k gui/$(id -u)/com.pranav.planner-backup
@@ -33,9 +36,6 @@
     <key>Minute</key>
     <integer>30</integer>
   </dict>
-
-  <key>RunAtLoad</key>
-  <true/>
 
   <key>EnvironmentVariables</key>
   <dict>

@@ -23,17 +23,20 @@ const USAGE = `planner - CLI for the planner Worker
 
 Usage: planner <command> [options]
 
-Available now (milestone 1):
+Available now (milestones 1-2):
   me                      validate the token; prints role, tz, server time, today
   health                  liveness (/api/health) + automation health rows
   today [--json]          pretty-print today: routine state, sleep, streak, running timers, health
+  day [date] [--json]     one day as text (GET /api/day/:date): category totals (h m), the 24 h timeline
+                          as "HH:MM–HH:MM  category  label (source)" rows, and the gaps
+                          date = YYYY-MM-DD | today (default) | yesterday, in the server's timezone
   tap <item> [--at ISO]   POST /api/tap as the app role (shower|run|stretch|shoulders|journal|bed|wake|winddown)
   taps [--json]           last 100 tap_log rows (newest first)
   config [--url URL]      show or set the Worker URL in ~/.config/planner/config.json
 
 Arriving in later milestones (exit 2 for now):
-  food add --json         (M3)   food search <q>     (M3)   eat ...        (M3)   day [date]   (M3)
-  block add ...           (M3)   session add ...     (M5)   set add ...    (M5)
+  food add --json         (M3)   food search <q>     (M3)   eat ...        (M3)   block add ...  (M3)
+  session add ...         (M5)   set add ...         (M5)
   rollup [day]            (M7)   export              (M7)   screentime phone --day --hours '{...}'  (M8)
 
 Global: --json prints the raw API response. --help / -h prints this.
@@ -41,13 +44,16 @@ Token: PLANNER_TOKEN env or Keychain item "${KEYCHAIN_SERVICE}" (security add-ge
 `
 
 const LATER = {
-  'food add': 3, 'food search': 3, eat: 3, day: 3, 'block add': 3,
+  'food add': 3, 'food search': 3, eat: 3, 'block add': 3,
   'session add': 5, 'set add': 5,
   rollup: 7, export: 7,
   'screentime phone': 8,
 }
 
 // ---------------------------------------------------------------- args
+
+// Flags that never take a value, so `planner day --json yesterday` keeps "yesterday" as a positional.
+const BOOL_FLAGS = new Set(['json', 'help'])
 
 function parseArgs(argv) {
   const positional = []
@@ -60,7 +66,7 @@ function parseArgs(argv) {
       if (eq > 0) { flags[a.slice(2, eq)] = a.slice(eq + 1); continue }
       const key = a.slice(2)
       const next = argv[i + 1]
-      if (next !== undefined && !next.startsWith('--')) { flags[key] = next; i++ } else flags[key] = true
+      if (!BOOL_FLAGS.has(key) && next !== undefined && !next.startsWith('--')) { flags[key] = next; i++ } else flags[key] = true
     } else if (a === '-h') {
       flags.help = true
     } else {
@@ -325,6 +331,94 @@ async function cmdToday(flags) {
   console.log(out.join('\n'))
 }
 
+// ---- day: GET /api/day/:date (the buildDay result from src/shared/day.ts) printed as text.
+// This is how Claude Code answers "how did yesterday go": totals per category, one row per block, the gaps.
+
+function shiftDay(day, delta) {
+  const [y, m, d] = day.split('-').map(Number)
+  const t = new Date(Date.UTC(y, m - 1, d + delta))
+  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}`
+}
+
+/** "today" and "yesterday" mean the server's local day (settings.tz), not this machine's clock. */
+async function resolveDay(arg) {
+  const a = String(arg ?? 'today').trim().toLowerCase()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(a)) return a
+  if (a !== 'today' && a !== 'yesterday') throw usage(`day wants YYYY-MM-DD, today or yesterday, got "${arg}"`)
+  const me = (await api('GET', '/api/me')).data
+  const today = me && typeof me.today === 'string' ? me.today : null
+  if (!today) throw new Error('/api/me did not say what today is')
+  return a === 'today' ? today : shiftDay(today, -1)
+}
+
+/** seconds -> "7h 32m" (the h m column of the totals table). */
+function hms(sec) {
+  const m = Math.max(0, Math.round((Number(sec) || 0) / 60))
+  return `${Math.floor(m / 60)}h ${pad2(m % 60)}m`
+}
+
+async function cmdDay(positional, flags) {
+  const day = await resolveDay(positional[0])
+  const { data: d } = await api('GET', `/api/day/${day}`)
+  if (flags.json) return console.log(JSON.stringify(d, null, 2))
+  if (!d || typeof d !== 'object' || !Array.isArray(d.blocks)) throw new Error(`GET /api/day/${day}: unexpected response (no blocks array)`)
+  const tz = d.tz || 'UTC'
+  const t = d.totals || {}
+  const gaps = Array.isArray(d.gaps) ? d.gaps : []
+  const clock = (iso) => (iso && iso === d.end ? '24:00' : localHHMM(iso, tz))
+  const span = (a, b) => `${clock(a)}–${clock(b)}`
+  // Seconds scored so far: the whole day for a past day, midnight -> now for today. Minutes after now do not exist yet.
+  const scored = d.now_min != null && Number.isFinite(Number(d.now_min)) ? Number(d.now_min) * 60 : Number(t.tracked_s) || 0
+  const unknown = Number(t.unknown_s) || 0
+  const tracked = Math.max(0, scored - unknown)
+  const pct = (s) => (scored > 0 ? `${Math.round((100 * (Number(s) || 0)) / scored)}%` : '-')
+  const out = []
+
+  let head = `Day ${d.day} (${tz})`
+  try { head += ` · ${new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(d.start))}` } catch { /* keep */ }
+  if (d.is_today) head += ` · today, up to ${localHHMM(new Date(new Date(d.start).getTime() + scored * 1000).toISOString(), tz)}`
+  out.push(head)
+  out.push(`  ${d.minutes} min in the day · ${hms(scored)} scored · ${hms(tracked)} tracked (${pct(tracked)}) · ${hms(unknown)} unknown (${pct(unknown)})`)
+
+  // totals: one row per painted category; manual/study/mac get their breakdown indented underneath
+  out.push('', 'Totals')
+  const rows = [['  category', 'h m', 'share']]
+  const breakdownOf = (name) => (name === 'manual' ? d.manual_by_category : name === 'study' ? d.study_by_project : name === 'mac' ? d.mac_by_category : null) || {}
+  let rawNote = false
+  for (const [name, key] of [['sleep', 'sleep_s'], ['workout', 'workout_s'], ['study', 'study_s'], ['routine', 'routine_s'], ['mac', 'mac_s'], ['phone', 'phone_s'], ['manual', 'manual_s'], ['unknown', 'unknown_s']]) {
+    const s = Number(t[key]) || 0
+    if (s <= 0 && name !== 'unknown') continue
+    rows.push([`  ${name}`, hms(s), pct(s)])
+    for (const [k, v] of Object.entries(breakdownOf(name)).sort((a, b) => Number(b[1]) - Number(a[1]))) {
+      if (name !== 'manual') rawNote = true
+      rows.push([`    ${k}`, hms(v), name === 'manual' ? pct(v) : ''])
+    }
+  }
+  out.push(table(rows))
+  if (rawNote) out.push('  (study / mac sub-rows are raw seconds from the source tables, so they can exceed the painted minutes)')
+
+  // timeline
+  out.push('', `Timeline (${d.blocks.length} block${d.blocks.length === 1 ? '' : 's'})`)
+  if (!d.blocks.length) out.push('  nothing yet')
+  else out.push(table(d.blocks.map((b) => [`  ${span(b.start, b.end)}`, b.category, `${b.label} (${b.source})`, hm(b.minutes)])))
+
+  // gaps: unknown runs of 5 min or more (shorter ones are absorbed into the previous block for display)
+  const gapMin = gaps.reduce((a, g) => a + (Number(g.minutes) || 0), 0)
+  out.push('', `Gaps (${gaps.length}${gaps.length ? `, ${hm(gapMin)} in runs of 5 min or more` : ''})`)
+  if (!gaps.length) out.push('  none')
+  else {
+    out.push(table(gaps.map((g) => [`  ${span(g.start, g.end)}`, hm(g.minutes)])))
+    out.push('  fill one by tapping it in the Day tab (planner block add arrives with milestone 3)')
+  }
+
+  if (Array.isArray(d.markers) && d.markers.length) {
+    out.push('', 'Meals')
+    out.push(table(d.markers.map((m) => [`  ${localHHMM(m.ts, tz)}`, m.label, `${m.kcal} kcal`, m.slot])))
+  }
+  if (d.sleep_inferred) out.push('', '  note: a night has no wake time yet, so its sleep is drawn as an 8 h guess (Sleep?). Set the wake time in the app.')
+  console.log(out.join('\n'))
+}
+
 // ---------------------------------------------------------------- dispatch
 
 function usage(msg) { const e = new Error(msg); e.usage = true; return e }
@@ -345,6 +439,7 @@ async function main() {
     case 'me': return cmdMe(flags)
     case 'health': return cmdHealth(flags)
     case 'today': return cmdToday(flags)
+    case 'day': return cmdDay(positional.slice(1), flags)
     case 'tap': return cmdTap(positional.slice(1), flags)
     case 'taps': return cmdTaps(flags)
     default:
