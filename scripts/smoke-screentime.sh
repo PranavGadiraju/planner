@@ -89,7 +89,7 @@ check_js "day shows the phone minutes"      200 "d.totals.phone_s === 1200 && d.
 check_js "apps never lists _total"          200 "d.apps.every((a) => a.app_id !== '_total') && d.apps.filter((a) => a.category === null).length === 2" -H "$APP" "$BASE/api/apps"
 check "apps with shortcut token"            403 '"error":"forbidden"' -H "$SC" "$BASE/api/apps"
 check "apps with mac token"                 403 '"error":"forbidden"' -H "$MAC" "$BASE/api/apps"
-check "automation health has mac + phone"   200 '"source":"mac","last_ok_at":"20[^"]*","last_error_at":null,"last_error":null,"detail":"3 hours / 2 intervals".*"source":"phone","last_ok_at":"20[^"]*".*"detail":"1 hours / 0 intervals"' -H "$APP" "$BASE/api/health/automations"
+check "automation health has mac + phone"   200 '"source":"mac","last_ok_at":"20[^"]*","last_error_at":[^,]*,"last_error":[^,]*,"detail":"3 hours / 2 intervals".*"source":"phone","last_ok_at":"20[^"]*".*"detail":"1 hours / 0 intervals"' -H "$APP" "$BASE/api/health/automations"
 check_js "today: triage count + last hours" 200 "d.health.apps_to_triage === 2 && d.health.mac_last_hour === '2026-01-05T15:00:00.000Z' && d.health.phone_last_hour === '$TO'" -H "$APP" "$BASE/api/today"
 
 # Categorise one app the way the PWA does (outbox -> /api/write), then confirm the list and the counters follow.

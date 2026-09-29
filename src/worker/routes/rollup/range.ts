@@ -56,7 +56,10 @@ export function planRange(days: readonly string[], rows: ReadonlyMap<string, Day
   pending.sort()
   plan.recompute = pending.slice(0, cap)
   for (const d of pending.slice(cap)) {
-    plan.stale.push(d) // beyond the cap every pending day is flagged, so the view can offer a refresh
+    // Beyond the cap only a missing or dirty day is flagged; a fresh non-final row is served as is (writes that
+    // touch a past day, including back-dated taps, mark it dirty, so "not dirty" really means up to date).
+    if (!rows.has(d) || dirty.has(d)) plan.stale.push(d)
+    else plan.asIs.push(d)
   }
   return plan
 }

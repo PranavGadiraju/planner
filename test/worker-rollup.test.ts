@@ -137,8 +137,8 @@ describe('/api/summary planning', () => {
     expect(plan.live).toBe(today)
     expect(plan.final).toEqual(['2026-09-20', '2026-09-25'])
     expect(plan.recompute).toEqual(['2026-09-21', '2026-09-22', '2026-09-23'])
-    expect(plan.stale).toEqual(['2026-09-24', '2026-09-26', '2026-09-27']) // every pending day beyond the cap
-    expect(plan.asIs).toEqual([])
+    expect(plan.stale).toEqual(['2026-09-24', '2026-09-26'])
+    expect(plan.asIs).toEqual(['2026-09-27'])
     // future days never appear anywhere
     const all = [plan.live, ...plan.final, ...plan.recompute, ...plan.stale, ...plan.asIs]
     expect(all).not.toContain('2026-09-29')
