@@ -2,7 +2,7 @@
 import type { Env, Route } from './env'
 import type { Role } from '../shared/types'
 import { bearerToken, roleForToken } from './auth'
-import { HttpError, error, errorMessage } from './http'
+import { HttpError, error } from './http'
 import { matchRoute } from './router'
 import { health } from './routes/health'
 import { me } from './routes/me'
@@ -59,8 +59,9 @@ export default {
       return await handleApi(request, env, url, ctx)
     } catch (e) {
       if (e instanceof HttpError) return error(e.status, e.message, e.extra)
+      // The raw message stays in the Worker log only: a D1 or fetch error could quote a bound value or a URL.
       console.error('unhandled', e)
-      return error(500, errorMessage(e))
+      return error(500, 'internal error')
     }
   },
   async scheduled(controller, env, ctx): Promise<void> {

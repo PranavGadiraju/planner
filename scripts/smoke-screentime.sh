@@ -91,6 +91,7 @@ check "apps with shortcut token"            403 '"error":"forbidden"' -H "$SC" "
 check "apps with mac token"                 403 '"error":"forbidden"' -H "$MAC" "$BASE/api/apps"
 check "automation health has mac + phone"   200 '"source":"mac","last_ok_at":"20[^"]*","last_error_at":[^,]*,"last_error":[^,]*,"detail":"3 hours / 2 intervals".*"source":"phone","last_ok_at":"20[^"]*".*"detail":"1 hours / 0 intervals"' -H "$APP" "$BASE/api/health/automations"
 check_js "today: triage count + last hours" 200 "d.health.apps_to_triage === 2 && d.health.mac_last_hour === '2026-01-05T15:00:00.000Z' && d.health.phone_last_hour === '$TO'" -H "$APP" "$BASE/api/today"
+check_js "day freshness: last mac/phone hour + mac last ok" 200 "d.freshness.mac_last_hour === '2026-01-05T15:00:00.000Z' && d.freshness.phone_last_hour === '$TO' && /^20[0-9]{2}-/.test(d.freshness.mac_last_ok_at)" -H "$APP" "$BASE/api/day/$DAY"
 
 # Categorise one app the way the PWA does (outbox -> /api/write), then confirm the list and the counters follow.
 LATER="$(node -e 'console.log(new Date(Date.now() + 1000).toISOString())')"
@@ -168,9 +169,35 @@ PYEOF
   AFTER2="$(mac_seconds)"
   if [ "$AFTER2" = "$AFTER1" ]; then echo "ok   no duplicates after the second push ($AFTER2 s)"; else echo "FAIL mac seconds changed on re-push: $AFTER1 -> $AFTER2"; FAIL=1; fi
   check_js "apps lists the fake bundle ids uncategorised" 200 "['com.fake.Editor', 'com.fake.Browser'].every((id) => d.apps.some((a) => a.app_id === id && a.category === null)) && d.apps.every((a) => a.app_id !== 'com.apple.dock' && a.app_id !== 'com.fake.Phone')" -H "$APP" "$BASE/api/apps"
+  # token-file fallback: a group/other-readable mac_token is refused, a chmod 600 one is read (Keychain lookup stubbed out, env unset)
+  if PLANNER_CONFIG_DIR="$CFG" "$PY" - <<'PYEOF'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("sp", "mac/screentime_push.py")
+sp = importlib.util.module_from_spec(spec); spec.loader.exec_module(sp)
+class Miss:
+    returncode = 1
+    stdout = ""
+sp.subprocess.run = lambda *a, **k: Miss()  # never touch the real Keychain from a smoke test
+os.environ.pop("PLANNER_MAC_TOKEN", None)
+os.makedirs(sp.CONFIG_DIR, exist_ok=True)
+with open(sp.TOKEN_FILE, "w") as f:
+    f.write("smoke-file-token\n")
+os.chmod(sp.TOKEN_FILE, 0o644)
+loose = sp.read_token()
+os.chmod(sp.TOKEN_FILE, 0o600)
+tight = sp.read_token()
+os.remove(sp.TOKEN_FILE)
+sys.exit(0 if loose is None and tight == "smoke-file-token" else 1)
+PYEOF
+  then echo "ok   mac_token file refused at mode 644, read at 600"; else echo "FAIL mac_token permission check"; FAIL=1; fi
   rm -rf "$WORK"
 else
   echo "skip mac/screentime_push.py run: $PY not found"
 fi
+
+# ---- a study block inside the Mac window lists the top Mac apps in it: hour 14 UTC holds editor 1800 s + browser 900 s,
+# the block covers half of it -> 900 / 450 (pro-rated hour rows); the browser has no label so its bundle's short name is used.
+check_js "time-block: study 14:00-14:30 UTC (app)" 201 "d.ids.length === 1 && d.blocks[0].category === 'study'" -X POST -H "$APP" -H "$J" -d "{\"blocks\":[{\"start\":\"2026-01-05T14:00:00Z\",\"end\":\"2026-01-05T14:30:00Z\",\"category\":\"study\",\"label\":\"smoke study\"}],\"day\":\"$DAY\"}" "$BASE/api/time-blocks"
+check_js "day: the study block carries its top Mac apps" 200 "(() => { const b = d.blocks.find((x) => x.category === 'study' && x.label === 'smoke study'); return !!b && b.minutes === 30 && JSON.stringify(b.apps) === JSON.stringify([{ label: 'Smoke Editor', seconds: 900 }, { label: 'browser', seconds: 450 }]) && d.blocks.filter((x) => x.category !== 'study').every((x) => x.apps === undefined) && d.totals.study_s === 1800 && d.totals.mac_s === 5400 })()" -H "$APP" "$BASE/api/day/$DAY"
 
 if [ "$FAIL" = 0 ]; then echo "== screentime smoke passed"; else echo "== screentime smoke FAILED"; exit 1; fi

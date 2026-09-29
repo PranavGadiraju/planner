@@ -8,7 +8,7 @@ import { parseDayParam } from '../router'
 import { addDays, dayWindow } from '../../shared/tz'
 import { buildDay } from '../../shared/day'
 import type { DayInput, DayResult, ScreenHour, ScreenInterval } from '../../shared/day'
-import type { AppCategoryRow, FoodLog, RoutineItem, RoutineLog, Session, Sleep, TimeBlock, Workout } from '../../shared/types'
+import type { AppCategoryRow, DayFreshness, FoodLog, RoutineItem, RoutineLog, Session, Sleep, TimeBlock, Workout } from '../../shared/types'
 
 export interface DayProject { id: string; name: string; color: string | null }
 
@@ -18,6 +18,22 @@ export interface DayPayload extends DayResult {
   projects: DayProject[]
   /** Live manual rows overlapping the window, so the app can edit or delete a block. */
   time_blocks: TimeBlock[]
+  /** "Mac last pushed 4 h ago · phone none today" for the foot of the view. */
+  freshness: DayFreshness
+}
+
+/** Three cheap MAX()/lookup statements that ride in the day batch (no extra round trip). */
+function freshnessStatements(db: D1Database): D1PreparedStatement[] {
+  return [
+    db.prepare("SELECT MAX(hour_start) AS h FROM screen_hours WHERE source = 'mac'"),
+    db.prepare("SELECT MAX(hour_start) AS h FROM screen_hours WHERE source = 'phone'"),
+    db.prepare("SELECT last_ok_at AS h FROM automation_health WHERE source = 'mac'"),
+  ]
+}
+
+function tsOf(r: D1Result<unknown> | undefined): string | null {
+  const v = (rows<{ h: unknown }>(r)[0] ?? {}).h
+  return typeof v === 'string' ? v : null
 }
 
 /** Everything buildDay needs for one day, plus the rows the API exposes next to the result. */
@@ -97,12 +113,14 @@ export async function day(c: RouteContext): Promise<Response> {
   const { env, now } = c
   const date = parseDayParam(c.params['date'] ?? '', now, env.TZ)
   if (!date) throw new HttpError(400, 'date must be YYYY-MM-DD or today')
-  const { input, items, projects } = await loadDayInput(env, date, now)
+  const { input, items, projects, extra } = await loadDayInput(env, date, now, freshnessStatements(env.DB))
+  const [macR, phoneR, macOkR] = extra
   const payload: DayPayload = {
     ...buildDay(input),
     routine_items: items.filter((i) => Number(i.active) === 1),
     projects,
     time_blocks: input.time_blocks,
+    freshness: { mac_last_hour: tsOf(macR), phone_last_hour: tsOf(phoneR), mac_last_ok_at: tsOf(macOkR) },
   }
   return json(payload)
 }

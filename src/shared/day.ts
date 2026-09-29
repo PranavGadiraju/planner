@@ -38,6 +38,7 @@ export interface DayInput {
   food_log?: Pick<FoodLog, 'ts' | 'label' | 'kcal' | 'slot'>[]
 }
 
+export interface BlockApp { label: string; seconds: number }
 export interface Block {
   start: string
   end: string
@@ -46,7 +47,11 @@ export interface Block {
   sub: string | null      // project id, app category, routine item id
   label: string
   source: string          // manual | sleep | sleep? | workout | session | routine | mac | mac-hours | phone | unknown
+  /** Study blocks only, when the Mac was in use inside the range: the top BLOCK_APPS_MAX apps by seconds (see attachStudyApps). */
+  apps?: BlockApp[]
 }
+export const BLOCK_APPS_MAX = 3
+const HOUR_MS = 3600_000
 export interface Gap { start: string; end: string; minutes: number }
 export interface Totals {
   sleep_s: number; workout_s: number; study_s: number; routine_s: number; mac_s: number; phone_s: number
@@ -143,14 +148,15 @@ export function buildDay(input: DayInput): DayResult {
   const appCat = new Map(input.app_categories.map((a) => [a.app_id, a]))
   const catOf = (app: string | null) => (app && appCat.get(app)?.category) || 'other'
   const labelOf = (app: string | null) => (app && (appCat.get(app)?.label || shortBundle(app))) || 'Mac'
-  for (const iv of byStart(input.screen_intervals.filter((i) => i.source === 'mac'), (i) => i.start_ts)) {
+  const macIntervals = byStart(input.screen_intervals.filter((i) => i.source === 'mac'), (i) => i.start_ts)
+  for (const iv of macIntervals) {
     fill(iv.start_ts, iv.end_ts, 'mac', labelOf(iv.top_app), catOf(iv.top_app), 'mac')
   }
 
   // 7. Mac hours without interval coverage: walk from the hour start
   const hourGroups = groupHours(input.screen_hours.filter((h) => h.source === 'mac'))
-  for (const [hourStart, rows] of hourGroups) {
-    const hs = Math.floor(msToMin(new Date(hourStart).getTime()))
+  for (const [hourMs, rows] of hourGroups) {
+    const hs = Math.floor(msToMin(hourMs))
     if (hs >= N || hs + 60 <= 0) continue
     const total = Math.min(3600, rows.reduce((a, r) => a + r.seconds, 0))
     let need = Math.min(60, Math.round(total / 60))
@@ -166,8 +172,8 @@ export function buildDay(input: DayInput): DayResult {
 
   // 8. phone hours take what is left of each hour
   const phoneGroups = groupHours(input.screen_hours.filter((h) => h.source === 'phone'))
-  for (const [hourStart, rows] of phoneGroups) {
-    const hs = Math.floor(msToMin(new Date(hourStart).getTime()))
+  for (const [hourMs, rows] of phoneGroups) {
+    const hs = Math.floor(msToMin(hourMs))
     if (hs >= N || hs + 60 <= 0) continue
     const totalRows = rows.filter((r) => r.app_id === '_total')
     const total = Math.min(3600, (totalRows.length ? totalRows : rows).reduce((a, r) => a + r.seconds, 0))
@@ -229,6 +235,9 @@ export function buildDay(input: DayInput): DayResult {
   }
   const gaps: Gap[] = display.filter((b) => b.category === 'unknown').map((b) => ({ start: b.start, end: b.end, minutes: b.minutes }))
 
+  // ---- top Mac apps inside each study block (after the merge above, so apps can never split a block)
+  attachStudyApps(display, macIntervals, hourGroups, labelOf)
+
   // ---- raw-seconds breakdowns (never from tinted cells)
   const winStartIso = win.start.toISOString(), winEndIso = win.end.toISOString()
   const macBy: Record<string, number> = {}
@@ -256,13 +265,60 @@ export function buildDay(input: DayInput): DayResult {
   }
 }
 
-function groupHours(rows: ScreenHour[]): Map<string, ScreenHour[]> {
-  const m = new Map<string, ScreenHour[]>()
+/** Hour rows grouped by their UTC hour start (epoch ms, so '…T13:00:00Z' and '…T13:00:00.000Z' meet), ascending. */
+function groupHours(rows: ScreenHour[]): Map<number, ScreenHour[]> {
+  const m = new Map<number, ScreenHour[]>()
   for (const r of rows) {
-    const list = m.get(r.hour_start)
-    if (list) list.push(r); else m.set(r.hour_start, [r])
+    const key = new Date(r.hour_start).getTime()
+    if (Number.isNaN(key)) continue
+    const list = m.get(key)
+    if (list) list.push(r); else m.set(key, [r])
   }
-  return new Map([...m.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)))
+  return new Map([...m.entries()].sort((a, b) => a[0] - b[0]))
+}
+
+/**
+ * For every study block, the top BLOCK_APPS_MAX Mac apps by seconds inside [start, end). Each UTC hour the block
+ * overlaps takes that hour's screen_hours rows pro-rated by the block's share of the hour (the per-app mix, so a
+ * 30 min block in an hour of 45 min VS Code + 15 min Safari lists 22.5 / 7.5 min); an hour with no rows falls back
+ * to the Mac focus intervals inside it, whose overlapped seconds go to their top_app. Never both for the same hour,
+ * so one push is not counted twice. Raw source seconds, independent of which source painted the minutes (a study
+ * session outranks Mac time on the chart, and this is what happened on the Mac during it). Cost: the block-hour
+ * pairs (at most blocks + minutes / 60) plus one pointer walk over the sorted intervals, so O(minutes + rows).
+ */
+function attachStudyApps(blocks: Block[], intervals: ScreenInterval[], hours: Map<number, ScreenHour[]>, labelOf: (app: string | null) => string): void {
+  const ivs = intervals.map((iv) => ({ s: new Date(iv.start_ts).getTime(), e: new Date(iv.end_ts).getTime(), app: iv.top_app }))
+  let ivIdx = 0 // blocks are disjoint and ascending, so the window only ever moves forward
+  for (const b of blocks) {
+    if (b.category !== 'study') continue
+    const bs = new Date(b.start).getTime()
+    const be = new Date(b.end).getTime()
+    const secs = new Map<string, number>()
+    const add = (app: string, s: number) => secs.set(app, (secs.get(app) ?? 0) + s)
+    for (let h = Math.floor(bs / HOUR_MS) * HOUR_MS; h < be; h += HOUR_MS) {
+      const a = Math.max(bs, h)
+      const z = Math.min(be, h + HOUR_MS)
+      const rows = hours.get(h)
+      if (rows && rows.length) {
+        const frac = (z - a) / HOUR_MS
+        for (const r of rows) add(r.app_id, r.seconds * frac)
+        continue
+      }
+      while (ivIdx < ivs.length && (ivs[ivIdx]?.e ?? Infinity) <= a) ivIdx++
+      for (let i = ivIdx; i < ivs.length; i++) {
+        const iv = ivs[i]
+        if (!iv || iv.s >= z) break
+        const o = Math.min(z, iv.e) - Math.max(a, iv.s)
+        if (o > 0 && iv.app) add(iv.app, o / 1000)
+      }
+    }
+    const top = [...secs.entries()]
+      .map(([app, s]) => ({ label: labelOf(app), seconds: Math.round(s) }))
+      .filter((x) => x.seconds > 0)
+      .sort((x, y) => y.seconds - x.seconds || (x.label < y.label ? -1 : x.label > y.label ? 1 : 0))
+      .slice(0, BLOCK_APPS_MAX)
+    if (top.length) b.apps = top
+  }
 }
 
 export function shortBundle(bundle: string): string {

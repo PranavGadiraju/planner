@@ -155,6 +155,10 @@ export interface TodayPayload {
   health: { rows: HealthRow[]; taps_today: number; mac_last_hour: ISO | null; phone_last_hour: ISO | null; apps_to_triage: number }
 }
 
+// ---- /api/day/:date
+/** How fresh the automatic sources are (the foot of the Day/Week/Month views): same MAX() facts as /api/today's health. */
+export interface DayFreshness { mac_last_hour: ISO | null; phone_last_hour: ISO | null; mac_last_ok_at: ISO | null }
+
 // ---- day_summary rows (rollups)
 export interface DaySummary {
   local_day: string

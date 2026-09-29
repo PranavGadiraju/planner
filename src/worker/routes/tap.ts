@@ -23,12 +23,19 @@ const NFC_ERROR_SQL =
 
 interface TapBody { item: string; at: Date }
 
+/** Item slugs: routine ids, bed, wake, winddown. Checked before any use so a leaked shortcut token cannot store junk. */
+export const MAX_ITEM_CHARS = 64
+export const ITEM_SLUG = /^[a-z0-9_-]+$/i
+/** automation_health.last_error is a one-line banner, never a dump. */
+export const MAX_HEALTH_MESSAGE_CHARS = 200
+
 /** {item, ts?} -> the item slug and the instant the state machines run at. Throws HttpError(400/413) on a malformed body. */
 async function parseTapBody(c: RouteContext, role: 'shortcut' | 'app'): Promise<TapBody> {
   const body = await readJson<unknown>(c.request)
   if (!isRecord(body)) throw new HttpError(400, 'body must be a JSON object')
   const item = typeof body['item'] === 'string' ? body['item'].trim() : ''
   if (!item) throw new HttpError(400, 'item required')
+  if (item.length > MAX_ITEM_CHARS || !ITEM_SLUG.test(item)) throw new HttpError(400, 'item invalid')
   // The shortcut role is always server-timestamped; the app may back-date its own taps.
   let at = c.now
   if (role === 'app' && body['ts'] !== undefined) {
@@ -54,7 +61,7 @@ export async function tap(c: RouteContext): Promise<Response> {
     // A malformed body still leaves a trace: the sticker "did something", and a broken Shortcut shows up in health.
     if (e instanceof HttpError) {
       const writes = [db.prepare(TAP_LOG_SQL).bind(arrivedIso, '(bad body)', role, 'bad_request')]
-      if (role === 'shortcut') writes.push(db.prepare(NFC_ERROR_SQL).bind(arrivedIso, e.message))
+      if (role === 'shortcut') writes.push(db.prepare(NFC_ERROR_SQL).bind(arrivedIso, e.message.slice(0, MAX_HEALTH_MESSAGE_CHARS)))
       await db.batch(writes)
     }
     throw e
@@ -84,7 +91,7 @@ export async function tap(c: RouteContext): Promise<Response> {
   const openAmong = (nights: string[]): Sleep | null =>
     sleepRows.find((r) => nights.includes(r.night_of) && !r.wake_ts) ?? null
   const streakWith = (row: Sleep | null): number =>
-    bedtimeStreak(row ? [row, ...sleepRows.filter((r) => r.night_of !== row.night_of)] : sleepRows, settings.late_grace_min)
+    bedtimeStreak(row ? [row, ...sleepRows.filter((r) => r.night_of !== row.night_of)] : sleepRows, settings.late_grace_min, night)
 
   const writes: D1PreparedStatement[] = []
   const upsert = (table: string, row: object) => {
@@ -155,7 +162,11 @@ export async function tap(c: RouteContext): Promise<Response> {
   for (const d of new Set([today, night])) if (d < arrivalDay) writes.push(db.prepare(TAP_DIRTY_SQL).bind(d, arrivedIso))
   writes.push(db.prepare(TAP_LOG_SQL).bind(arrivedIso, itemOut, role, action))
   if (role === 'shortcut') {
-    writes.push(status === 200 ? db.prepare(NFC_OK_SQL).bind(arrivedIso) : db.prepare(NFC_REACHED_WITH_ERROR_SQL).bind(arrivedIso, arrivedIso, message))
+    writes.push(
+      status === 200
+        ? db.prepare(NFC_OK_SQL).bind(arrivedIso)
+        : db.prepare(NFC_REACHED_WITH_ERROR_SQL).bind(arrivedIso, arrivedIso, message.slice(0, MAX_HEALTH_MESSAGE_CHARS)),
+    )
   }
   await db.batch(writes)
 

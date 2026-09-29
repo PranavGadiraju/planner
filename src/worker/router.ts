@@ -60,6 +60,20 @@ export function isCalendarDay(s: string): boolean {
   return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d
 }
 
+// Zoned ISO-8601 only: YYYY-MM-DDTHH:MM[:SS[.fff]] followed by Z or an offset. `new Date(s)` alone also swallows
+// V8's legacy forms ('12' -> 2001-12-01, '2026-09-28' -> UTC midnight, 'Sep 28 2026 10:00' and a zone-less
+// 'YYYY-MM-DDTHH:MM' read in the Worker's UTC) and rolls 2026-02-30 or 24:00 over to the next day; none of those
+// is what a typo meant, so they are refused instead of landing a row on the wrong day.
+const ISO_ZONED = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/
+
+/** A zoned ISO-8601 instant (2026-09-28T10:00:00Z, 2026-09-28T06:00-04:00) on a real calendar day, else null. */
+export function parseIso(s: string): Date | null {
+  const m = ISO_ZONED.exec(s)
+  if (!m || !isCalendarDay(m[1] ?? '') || Number(m[2]) > 23 || Number(m[3]) > 59 || Number(m[4] ?? 0) > 59) return null
+  const d = new Date(s)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
 /** A ':date' path parameter -> local day: 'today' (in tz, at `now`) or a valid YYYY-MM-DD; null when it is neither. */
 export function parseDayParam(raw: string, now: Date, tz: string): string | null {
   const v = raw.trim().toLowerCase()

@@ -31,8 +31,11 @@ export interface Statement { sql: string; params: Scalar[] }
 
 export const MAX_SCREENTIME_BODY = 1024 * 1024
 export const MAX_WINDOW_MS = 48 * 3600_000
-export const MAX_HOURS = 10_000
-export const MAX_INTERVALS = 5_000
+// Row caps sized to what a 48 h window can really hold (a real hourly push is a few hundred rows; a 48 h backfill
+// with ~60 distinct apps per hour is 3000), so a misused token or a client bug cannot make the validate/dedupe/sort
+// loops below eat the 10 ms CPU budget.
+export const MAX_HOURS = 3_000
+export const MAX_INTERVALS = 2_000
 export const MAX_APPS = 2_000
 const MAX_ID = 200
 const MAX_DEVICE = 100
