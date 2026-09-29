@@ -38,7 +38,8 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
-    proxy: { '/api': 'http://localhost:8787' },
+    // Point at another local Worker with PLANNER_API=http://localhost:8793 (e.g. when several dev servers run at once).
+    proxy: { '/api': process.env.PLANNER_API ?? 'http://localhost:8787' },
   },
   build: { outDir: 'dist', sourcemap: true, target: 'es2022' },
   test: {
