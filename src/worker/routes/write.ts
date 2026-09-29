@@ -17,6 +17,9 @@ export const MAX_REBUILDS_PER_WRITE = 5
 /** `days`: every local day the row can change (routes/rollup/summary.ts rowDays), for dirty_days and the rebuilds. */
 interface Planned { table: string; key: string; days: string[]; stmt: D1PreparedStatement }
 
+/** Parent tables first when rows are applied one by one (foreign keys: sets -> workouts/exercises, sessions -> projects, ...). */
+const TABLE_RANK: Record<string, number> = { projects: 0, foods: 0, exercises: 0, routine_items: 0, settings: 0, app_categories: 0, workouts: 1, meals: 1, sessions: 2, time_blocks: 2, sets: 2, meal_items: 2, food_log: 2 }
+const tableRank = (t: string): number => TABLE_RANK[t] ?? 1
 const DIRTY_SQL = 'INSERT INTO dirty_days (local_day, marked_at) VALUES (?, ?) ON CONFLICT(local_day) DO UPDATE SET marked_at = excluded.marked_at'
 
 export async function write(c: RouteContext): Promise<Response> {
@@ -68,12 +71,13 @@ export async function write(c: RouteContext): Promise<Response> {
     try {
       // One transactional batch: rows plus their dirty-day marks.
       dirty = dirtyDays(plan)
-      await db.batch([...plan.map((p) => p.stmt), ...dirtyStmts(dirty)])
+      // Foreign keys are checked at commit, so a child row may precede its parent inside one batch.
+      await db.batch([db.prepare('PRAGMA defer_foreign_keys = ON'), ...plan.map((p) => p.stmt), ...dirtyStmts(dirty)])
       applied = plan.length
     } catch {
       // Something in the batch failed (constraint, bad enum, FK...). Apply row by row and report each failure.
       const ok: Planned[] = []
-      for (const p of plan) {
+      for (const p of [...plan].sort((a, b) => tableRank(a.table) - tableRank(b.table))) {
         try {
           await p.stmt.run()
           ok.push(p)

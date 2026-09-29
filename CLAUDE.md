@@ -60,10 +60,10 @@ Tokens live in Worker secrets (`wrangler secret put`), the login Keychain (`plan
 
 `node bin/planner <command>` (or `planner ...` if `bin/planner` is symlinked into `~/bin`). It reads the Worker URL
 from `~/.config/planner/config.json` (`{"url": "..."}`, or `PLANNER_URL`) and the APP token from the Keychain (or
-`PLANNER_TOKEN`). Exit codes: 0 ok, 1 network/auth/server error, 2 usage or "not available until milestone N".
+`PLANNER_TOKEN`). Exit codes: 0 ok, 1 network/auth/server error, 2 usage error.
 Add `--json` when you need to parse the response instead of the pretty text.
 
-Available now (milestones 1-2 and 7):
+Commands:
 
 | Command | Use it to |
 |---|---|
@@ -77,9 +77,14 @@ Available now (milestones 1-2 and 7):
 | `planner export [--out FILE]` | (M7) `GET /api/export` -> a JSON dump of every table (default `~/planner-backups/export-<date>.json`, capped at 20k rows per table; the file lists which tables were truncated). Never prints the data or the token |
 | `planner screentime phone --day YYYY-MM-DD --hours '{"7":12,"8":45}' [--dry-run]` | (M7) post a day of iPhone usage read from a Screen Time screenshot: local hours -> UTC `_total` rows, `POST /api/screentime` as the app role (source `phone`, device `iPhone`). `--dry-run` prints the body instead of posting; the recipe below says when to use it |
 | `planner config --url URL` | first-time setup |
+| `planner food add --json '{...}'` | add a food from a nutrition label: `{name, brand?, serving_g, per_serving:{kcal,protein_g,carb_g,fat_g,fiber_g?,sugar_g?}}` or `per100:{kcal_100,...}`; the Worker converts to per 100 g, stores `source: 'claude'`, prints the row and any 4/4/9 warning |
+| `planner food search <q> [--usda] [--branded]` | saved foods matching `q`; `--usda` adds FoodData Central candidates (generic, or `--branded`) |
+| `planner eat --food <id\|name> --grams N` / `--meal <id\|name> [--scale S]` `[--at HH:MM] [--slot ...] [--note ...]` | log something eaten with a macro snapshot; an ambiguous name prints the candidates and exits 1 |
+| `planner session add --project <name> (--minutes N \| --start HH:MM --end HH:MM) [--note ...] [--day D]` | log a finished study / project session ("log 90 min on planner: built the sync layer") |
+| `planner set add (--workout <id> \| --new "Push") --exercise <name> --reps N --weight W [--sets K] [--warmup]` | log sets from text or a gym-notebook photo ("bench 3x8@135") |
+| `planner block add --from HH:MM --to HH:MM --category <cat> [--label ...] [--project ...] [--day D]` | fill a gap in the day chart ("1 to 2pm was groceries") |
 
-Later milestones (they exist as stubs that exit 2 until then): `food add --json`, `food search`, `eat`,
-`block add` (M3); `session add`, `set add` (M5).
+Every command above is live; `planner <cmd> --help` prints the exact flags.
 
 When the user asks how today is going, run `planner today`. When they ask how yesterday (or any day) went, run
 `planner day yesterday` / `planner day YYYY-MM-DD` and answer from its output; never guess. Reading that output:
@@ -97,7 +102,7 @@ When the user asks how today is going, run `planner today`. When they ask how ye
 When they ask to log something, show what you are about to send and confirm before posting anything that is not
 idempotent.
 
-## Recipe: nutrition label -> food (`/label`, arrives with milestone 3)
+## Recipe: nutrition label -> food (`/label`)
 
 Full version in `.claude/skills/label/SKILL.md`. Summary:
 

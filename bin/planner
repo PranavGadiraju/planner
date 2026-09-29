@@ -23,7 +23,7 @@ const USAGE = `planner - CLI for the planner Worker
 
 Usage: planner <command> [options]
 
-Available now (milestones 1-2, 7):
+Available now:
   me                      validate the token; prints role, tz, server time, today
   health                  liveness (/api/health) + automation health rows
   today [--json]          pretty-print today: routine state, sleep, streak, running timers, health
@@ -40,23 +40,30 @@ Available now (milestones 1-2, 7):
                           (source 'phone'); --dry-run prints the body instead of posting it
   config [--url URL]      show or set the Worker URL in ~/.config/planner/config.json
 
-Arriving in later milestones (exit 2 for now):
-  food add --json         (M3)   food search <q>     (M3)   eat ...        (M3)   block add ...  (M3)
-  session add ...         (M5)   set add ...         (M5)
+  food add --json '{...}' | --stdin
+                          POST /api/foods: {name, brand?, serving_g?, serving_text?, per_serving?:{kcal,protein_g,carb_g,fat_g,fiber_g?,sugar_g?}
+                          | per100?:{kcal_100,...}, source?, source_id?, label_json?}; prints the per-100 g row + 4/4/9 warnings
+  food search <q> [--usda] [--branded]
+                          saved foods matching <q> (GET /api/foods?q=); --usda adds USDA candidates (generic, or --branded)
+  eat --food <id|name> --grams N | --meal <id|name> [--scale S]  [--at HH:MM|ISO] [--slot breakfast|lunch|dinner|snack] [--note ...]
+                          POST /api/food-log with a macro snapshot; an ambiguous name lists the candidates
+  session add --project <name|id> (--minutes N | --start HH:MM|ISO --end HH:MM|ISO) [--note ...] [--day YYYY-MM-DD]
+                          POST /api/sessions (creates the project if unknown)
+  set add (--workout <id> | --new "Push") --exercise <name|id> --reps N --weight W [--sets K] [--warmup]
+                          POST /api/sets: K sets of N reps at W (creates the exercise / workout if asked)
+  block add --from HH:MM|ISO --to HH:MM|ISO --category <cat> [--label ...] [--project <name|id>] [--day YYYY-MM-DD]
+                          POST /api/time-blocks (cat: sleep|workout|study|routine|meal|chores|social|commute|rest|phone|other)
 
 Global: --json prints the raw API response. --help / -h prints this.
 Token: PLANNER_TOKEN env or Keychain item "${KEYCHAIN_SERVICE}" (security add-generic-password -U -a "$USER" -s ${KEYCHAIN_SERVICE} -w).
 `
 
-const LATER = {
-  'food add': 3, 'food search': 3, eat: 3, 'block add': 3,
-  'session add': 5, 'set add': 5,
-}
+const LATER = {}
 
 // ---------------------------------------------------------------- args
 
 // Flags that never take a value, so `planner day --json yesterday` keeps "yesterday" as a positional.
-const BOOL_FLAGS = new Set(['json', 'help', 'dry-run'])
+const BOOL_FLAGS = new Set(['json', 'help', 'dry-run', 'usda', 'branded', 'stdin', 'warmup'])
 
 function parseArgs(argv) {
   const positional = []
@@ -149,7 +156,10 @@ async function api(method, path, { auth = true, body } = {}) {
   if (res.status === 404) throw new Error(`${method} ${path} -> 404 (route not deployed yet, or wrong URL ${url})`)
   if (!res.ok && !(res.status === 400 && data && typeof data === 'object' && 'action' in data)) {
     const msg = data && typeof data === 'object' && (data.message || data.error) ? (data.message || data.error) : text.slice(0, 300)
-    throw new Error(`${method} ${path} -> ${res.status}${msg ? `: ${msg}` : ''}`)
+    const err = new Error(`${method} ${path} -> ${res.status}${msg ? `: ${msg}` : ''}`)
+    err.status = res.status
+    err.data = data
+    throw err
   }
   return { status: res.status, data }
 }
@@ -544,6 +554,126 @@ async function cmdScreentimePhone(flags) {
   console.log(`ok: ${day} (${tz}) · ${n('hours', rows.length)} hours (${hm(Math.round(total))} on the phone), ${n('intervals', 0)} intervals, ${n('apps_new', 0)} new apps${days}`)
 }
 
+// ---------------------------------------------------------------- food / sessions / sets / blocks helpers (Claude Code)
+
+function num(v, name) {
+  if (v === undefined || v === true) throw usage(`--${name} is required`)
+  const n = Number(v)
+  if (!Number.isFinite(n)) throw usage(`--${name} must be a number, got "${v}"`)
+  return n
+}
+const r1 = (n) => Math.round(Number(n) * 10) / 10
+
+function printFood(f) {
+  const serving = f.serving_g ? ` · serving ${f.serving_g} g${f.serving_text ? ` (${f.serving_text})` : ''}` : ''
+  console.log(`${f.name}${f.brand ? ` (${f.brand})` : ''}  [${f.id}]  source ${f.source}${f.source_id ? ` ${f.source_id}` : ''}${serving}`)
+  console.log(`  per 100 g: ${r1(f.kcal_100)} kcal · P ${r1(f.protein_100)} · C ${r1(f.carb_100)} · F ${r1(f.fat_100)}${f.fiber_100 != null ? ` · fiber ${r1(f.fiber_100)}` : ''}${f.sugar_100 != null ? ` · sugar ${r1(f.sugar_100)}` : ''}`)
+}
+
+async function readJsonArg(positional, flags) {
+  // --json is a boolean flag elsewhere, so the object lands in the positionals: `food add --json '{...}'`.
+  let raw = typeof flags.json === 'string' ? flags.json : (positional.find((p) => p.trim().startsWith('{')) ?? null)
+  if (flags.stdin) raw = await new Promise((resolve, reject) => { let s = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', (c) => { s += c }); process.stdin.on('end', () => resolve(s)); process.stdin.on('error', reject) })
+  if (!raw) throw usage('food add wants --json \'{...}\' or --stdin')
+  try { return JSON.parse(raw) } catch (e) { throw usage(`--json is not valid JSON: ${e.message}`) }
+}
+
+async function cmdFoodAdd(positional, flags) {
+  const body = await readJsonArg(positional, flags)
+  if (!body || typeof body !== 'object') throw usage('food add wants a JSON object')
+  if (!body.source) body.source = 'claude'
+  const { data } = await api('POST', '/api/foods', { body })
+  if (!data || !data.food) throw new Error('POST /api/foods: unexpected response (no food)')
+  console.log('saved:')
+  printFood(data.food)
+  for (const w of data.warnings || []) console.log(`  warning: ${w}`)
+}
+
+async function cmdFoodSearch(positional, flags) {
+  const q = positional.join(' ').trim()
+  if (!q) throw usage('food search wants a query, e.g. planner food search "greek yogurt"')
+  const { data } = await api('GET', `/api/foods?q=${encodeURIComponent(q)}&limit=20`)
+  const usda = flags.usda ? (await api('GET', `/api/lookup/search?q=${encodeURIComponent(q)}&type=${flags.branded ? 'branded' : 'generic'}`)).data : null
+  if (flags.json) return console.log(JSON.stringify({ saved: data, usda }, null, 2))
+  const foods = (data && data.foods) || []
+  console.log(`Saved foods matching "${q}": ${foods.length}`)
+  for (const f of foods) printFood(f)
+  if (usda) {
+    const c = usda.candidates || []
+    console.log(`USDA ${flags.branded ? 'branded' : 'generic'} candidates: ${c.length}${usda.demo_key ? ' (DEMO_KEY: rate-limited; set USDA_KEY on the Worker)' : ''}`)
+    for (const x of c) console.log(`  ${x.name}${x.brand ? ` (${x.brand})` : ''}  fdcId ${x.source_id}  ${r1(x.kcal_100)} kcal · P ${r1(x.protein_100)} · C ${r1(x.carb_100)} · F ${r1(x.fat_100)}${x.serving_text ? ` · ${x.serving_text}` : ''}`)
+  }
+}
+
+async function cmdEat(flags) {
+  const body = {}
+  const ref = (v) => (typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(v) ? 'id' : 'name')
+  if (typeof flags.food === 'string') { body[`food_${ref(flags.food)}`] = flags.food; body.grams = num(flags.grams, 'grams') }
+  else if (typeof flags.meal === 'string') { body[`meal_${ref(flags.meal)}`] = flags.meal; body.scale = flags.scale === undefined ? 1 : num(flags.scale, 'scale') }
+  else throw usage('eat wants --food <id|name> --grams N or --meal <id|name> [--scale S]')
+  if (typeof flags.at === 'string') body.at = flags.at
+  if (typeof flags.slot === 'string') body.slot = flags.slot
+  if (typeof flags.note === 'string') body.note = flags.note
+  let res
+  try { res = await api('POST', '/api/food-log', { body }) } catch (e) {
+    if (e.status === 400 && e.data && Array.isArray(e.data.candidates)) {
+      console.error(`${e.message}`)
+      for (const c of e.data.candidates) console.error(`  ${c.name}${c.brand ? ` (${c.brand})` : ''}  [${c.id}]`)
+      console.error('use the id, e.g. --food <id>')
+      process.exitCode = 1
+      return
+    }
+    throw e
+  }
+  const d = res.data
+  if (flags.json) return console.log(JSON.stringify(d, null, 2))
+  const e = d && d.entry
+  if (!e) throw new Error('POST /api/food-log: unexpected response (no entry)')
+  console.log(`logged: ${e.label} · ${e.grams != null ? `${e.grams} g` : `${e.scale}x`} · ${r1(e.kcal)} kcal · P ${r1(e.protein_g)} · C ${r1(e.carb_g)} · F ${r1(e.fat_g)} · ${e.slot} on ${e.local_day}`)
+}
+
+async function cmdSessionAdd(flags) {
+  if (typeof flags.project !== 'string') throw usage('session add wants --project <name|id>')
+  const body = { project: flags.project }
+  if (flags.minutes !== undefined) body.minutes = num(flags.minutes, 'minutes')
+  else if (typeof flags.start === 'string' && typeof flags.end === 'string') { body.start = flags.start; body.end = flags.end }
+  else throw usage('session add wants --minutes N or --start HH:MM --end HH:MM')
+  if (typeof flags.note === 'string') body.note = flags.note
+  if (typeof flags.day === 'string') body.day = flags.day
+  const { data } = await api('POST', '/api/sessions', { body })
+  if (flags.json) return console.log(JSON.stringify(data, null, 2))
+  const s = data && data.session
+  if (!s) throw new Error('POST /api/sessions: unexpected response (no session)')
+  console.log(`logged: ${s.project_name || flags.project} · ${hm(Math.round((s.duration_s || 0) / 60))} on ${s.local_day}${s.note ? ` · "${s.note}"` : ''}  [${s.id}]`)
+}
+
+async function cmdSetAdd(flags) {
+  const body = {}
+  if (typeof flags.workout === 'string') body.workout_id = flags.workout
+  else if (typeof flags.new === 'string') body.new_workout = { name: flags.new }
+  else throw usage('set add wants --workout <id> or --new "<name>"')
+  if (typeof flags.exercise !== 'string') throw usage('set add wants --exercise <name|id>')
+  body.exercise = flags.exercise
+  const reps = num(flags.reps, 'reps'), weight = num(flags.weight, 'weight')
+  const count = flags.sets === undefined ? 1 : num(flags.sets, 'sets')
+  body.sets = Array.from({ length: Math.max(1, Math.round(count)) }, () => ({ reps, weight, is_warmup: flags.warmup ? 1 : 0 }))
+  const { data } = await api('POST', '/api/sets', { body })
+  if (flags.json) return console.log(JSON.stringify(data, null, 2))
+  console.log(`logged: ${body.sets.length} × ${reps} @ ${weight}${flags.warmup ? ' (warm-up)' : ''} · ${flags.exercise} · workout ${data && data.workout_id ? data.workout_id : '?'}`)
+}
+
+async function cmdBlockAdd(flags) {
+  for (const k of ['from', 'to', 'category']) if (typeof flags[k] !== 'string') throw usage(`block add wants --${k}`)
+  const block = { start: flags.from, end: flags.to, category: flags.category }
+  if (typeof flags.label === 'string') block.label = flags.label
+  if (typeof flags.project === 'string') block.project = flags.project
+  const body = { blocks: [block] }
+  if (typeof flags.day === 'string') body.day = flags.day
+  const { data } = await api('POST', '/api/time-blocks', { body })
+  if (flags.json) return console.log(JSON.stringify(data, null, 2))
+  console.log(`logged: ${flags.category}${block.label ? ` "${block.label}"` : ''} ${flags.from}–${flags.to}${body.day ? ` on ${body.day}` : ''}  [${(data && data.ids && data.ids[0]) || '?'}]`)
+}
+
 // ---------------------------------------------------------------- dispatch
 
 function usage(msg) { const e = new Error(msg); e.usage = true; return e }
@@ -572,6 +702,20 @@ async function main() {
     case 'screentime':
       if (positional[1] === 'phone') return cmdScreentimePhone(flags)
       throw usage(`screentime wants "phone", got "${positional[1] ?? ''}"`)
+    case 'food':
+      if (positional[1] === 'add') return cmdFoodAdd(positional.slice(2), flags)
+      if (positional[1] === 'search') return cmdFoodSearch(positional.slice(2), flags)
+      throw usage(`food wants "add" or "search", got "${positional[1] ?? ''}"`)
+    case 'eat': return cmdEat(flags)
+    case 'session':
+      if (positional[1] === 'add') return cmdSessionAdd(flags)
+      throw usage(`session wants "add", got "${positional[1] ?? ''}"`)
+    case 'set':
+      if (positional[1] === 'add') return cmdSetAdd(flags)
+      throw usage(`set wants "add", got "${positional[1] ?? ''}"`)
+    case 'block':
+      if (positional[1] === 'add') return cmdBlockAdd(flags)
+      throw usage(`block wants "add", got "${positional[1] ?? ''}"`)
     default:
       throw usage(`unknown command: ${cmd}`)
   }

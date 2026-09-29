@@ -167,10 +167,12 @@ async function run(): Promise<void> {
   status.value = 'syncing'
   const batch = q.slice(0, MAX_BATCH)
   const body: WriteRequest = { mutations: [] }
+  // Rows travel in enqueue order (only adjacent rows of one table are grouped): a workout/exercise/project/food
+  // row enqueued before its sets/sessions/log rows must reach D1 first or the foreign key rejects the child.
   for (const item of batch) {
-    let m = body.mutations.find((x) => x.table === item.table)
-    if (!m) { m = { table: item.table, rows: [] }; body.mutations.push(m) }
-    m.rows.push(item.row)
+    const last = body.mutations[body.mutations.length - 1]
+    if (last && last.table === item.table) last.rows.push(item.row)
+    else body.mutations.push({ table: item.table, rows: [item.row] })
   }
 
   let res: WriteResponse
