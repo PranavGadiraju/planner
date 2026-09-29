@@ -7,12 +7,13 @@ import { Icon } from '../components/Icon'
 import { toast } from '../components/Toast'
 import { ApiError, apiGet, setToken, token } from '../data/api'
 import * as outbox from '../data/outbox'
-import { loadToday, saveSettings, settings, syncState } from '../data/store'
+import { loadToday, saveSettings, settings, syncState, today } from '../data/store'
 import { minusMinutes } from '../data/format'
 
 const DEVICE_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
 
 export function Settings() {
+  const triage = today.value?.health.apps_to_triage ?? 0
   return (
     <>
       <SubBar title="Settings" fallback="#/" />
@@ -24,6 +25,11 @@ export function Settings() {
             <a class="list-row list-link" href="#/settings/routine"><Icon name="list" /><span class="grow">Routine items</span><Icon name="chevron" size={18} /></a>
             <a class="list-row list-link" href="#/settings/shortcut"><Icon name="link" /><span class="grow">Shortcut &amp; NFC setup</span><Icon name="chevron" size={18} /></a>
             <a class="list-row list-link" href="#/settings/taps"><Icon name="tag" /><span class="grow">NFC tap log</span><Icon name="chevron" size={18} /></a>
+            <a class="list-row list-link" href="#/settings/apps">
+              <Icon name="work" />
+              <span class="grow">Mac apps{triage > 0 && <span class="faint"> · {triage} to categorise</span>}</span>
+              <Icon name="chevron" size={18} />
+            </a>
           </div>
         </section>
         <ToolsSection />

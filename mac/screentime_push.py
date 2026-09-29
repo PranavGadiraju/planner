@@ -8,7 +8,8 @@ which must have Full Disk Access. Standard library only; Python 3.9 compatible.
 What it does, in order:
   1. copies knowledgeC.db (+ -wal + -shm) to a temp dir and opens the copy read-only (URI mode=ro)
   2. reads app intervals for THIS Mac (ZSOURCE.ZDEVICEID IS NULL) in the window
-       [max(watermark - 3 h, now - 26 h), now)
+       [max(watermark - 3 h, now - 26 h) floored to the UTC hour, now)
+     (hour-aligned so every re-sent hour row is complete; the Worker replaces the window's rows)
      from '/app/inFocus', falling back to '/app/usage' when inFocus coverage is suspiciously low
      (fewer than 25 % of the rows /app/usage gives); logs which stream was used
   3. splits every interval at UTC hour boundaries into per-app seconds (clamped to 3600 per hour),
@@ -117,19 +118,26 @@ def write_watermark(ts: float) -> None:
     os.replace(tmp, WATERMARK_FILE)
 
 
+def align_hour(ts: float) -> float:
+    """Floor to the UTC hour. The Worker deletes-and-replaces the window's hour rows, so the window must start on
+    an hour boundary: a window starting mid-hour would re-send a partial count for that hour and overwrite the
+    complete one from the previous run."""
+    return ts - (ts % 3600)
+
+
 def compute_window(now: float, since: Optional[str]) -> Tuple[float, float]:
     if since:
         start = parse_iso(since)
         if now - start > SINCE_CAP_S:
             log("--since is more than 48 h ago; capping the window at 48 h to protect the D1 write budget")
             start = now - SINCE_CAP_S
-        return start, now
+        return align_hour(start), now
     wm = read_watermark()
     floor = now - LOOKBACK_MAX_S
     if wm is None:
         log("no watermark yet ({}); using the full 26 h window".format(WATERMARK_FILE))
-        return floor, now
-    return max(wm - WATERMARK_OVERLAP_S, floor), now
+        return align_hour(floor), now
+    return align_hour(max(wm - WATERMARK_OVERLAP_S, floor)), now
 
 
 # ------------------------------------------------------------------------------------------ database

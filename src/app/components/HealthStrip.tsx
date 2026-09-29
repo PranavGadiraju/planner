@@ -1,18 +1,24 @@
-// Small muted line: Mac push freshness, taps today, outbox, apps to triage.
+// Small muted line: Mac push freshness, phone rows today, taps today, outbox, apps to triage.
 import type { TodayPayload } from '@shared/types'
 import { agoLabel } from '../data/format'
+import { macStatus, phoneStatus } from '../data/apps'
+import { tz } from '../data/store'
+import '../styles/apps.css'
 
 export function HealthStrip({ health, pending, now }: { health: TodayPayload['health']; pending: number; now: Date }) {
-  const mac = health.rows.find((r) => r.source === 'mac')
-  const macAt = mac?.last_ok_at ?? health.mac_last_hour
-  const macStale = macAt ? now.getTime() - new Date(macAt).getTime() > 3 * 3600_000 : false
+  const zone = tz.value
+  const mac = macStatus(health, now, zone)
+  const phone = phoneStatus(health, now, zone)
+  const macRow = health.rows.find((r) => r.source === 'mac')
+  const triage = health.apps_to_triage
   return (
     <div class="health" aria-label="Automation health">
-      <span class={macStale ? 'warn' : undefined}>{macAt ? `Mac: last push ${agoLabel(macAt, now)}` : 'Mac: no data yet'}</span>
+      <span class={mac.warn ? 'warn' : undefined}>{mac.text}</span>
+      <span class={phone.warn ? 'warn' : undefined}>{phone.text}</span>
       <span>Taps today: {health.taps_today}</span>
       {pending > 0 && <span class="warn">Outbox: {pending} pending</span>}
-      {health.apps_to_triage > 0 && <span>{health.apps_to_triage} apps to categorise</span>}
-      {mac?.last_error && <span class="warn" title={mac.last_error}>Mac error {agoLabel(mac.last_error_at, now)}</span>}
+      {triage > 0 && <a class="health-link" href="#/settings/apps">{triage} app{triage === 1 ? '' : 's'} to categorise</a>}
+      {macRow?.last_error && <span class="warn" title={macRow.last_error}>Mac error {agoLabel(macRow.last_error_at, now)}</span>}
     </div>
   )
 }
