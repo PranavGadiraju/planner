@@ -4,7 +4,7 @@ import type { JSX } from 'preact'
 export type IconName =
   | 'gear' | 'refresh' | 'back' | 'chevron' | 'up' | 'down' | 'check' | 'plus' | 'x' | 'copy'
   | 'today' | 'food' | 'lift' | 'work' | 'day' | 'moon' | 'sun' | 'bed'
-  | 'shower' | 'run' | 'stretch' | 'shoulders' | 'journal' | 'dot' | 'tag' | 'list' | 'link' | 'trash'
+  | 'shower' | 'run' | 'stretch' | 'shoulders' | 'journal' | 'dot' | 'tag' | 'list' | 'link' | 'trash' | 'edit'
 
 const PATHS: Record<IconName, JSX.Element> = {
   gear: (
@@ -40,6 +40,7 @@ const PATHS: Record<IconName, JSX.Element> = {
   list: <><path d="M8 6h13" /><path d="M8 12h13" /><path d="M8 18h13" /><path d="M3 6h.01" /><path d="M3 12h.01" /><path d="M3 18h.01" /></>,
   link: <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></>,
   trash: <><path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" /></>,
+  edit: <><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="M13 7l4 4" /></>,
 }
 
 export function Icon({ name, size = 22, stroke = 1.75, class: cls }: { name: IconName; size?: number; stroke?: number; class?: string }) {

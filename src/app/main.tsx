@@ -8,10 +8,14 @@ import { loadToken } from './data/api'
 import * as outbox from './data/outbox'
 import { loadRoutineItemsCache, loadToday, startClock } from './data/store'
 
-// Service worker: precached shell, autoUpdate, one "Reload for update" toast when a new build is waiting.
+// Service worker: precached shell, registerType 'prompt', one "Reload for update" toast when a new build is waiting.
+// Reload = push any queued writes first, then activate the waiting worker (which reloads the page).
 const updateSW = registerSW({
   onNeedRefresh() {
-    toast('A new version is ready', { sticky: true, action: { label: 'Reload', fn: () => void updateSW(true) } })
+    toast('A new version is ready', {
+      sticky: true,
+      action: { label: 'Reload', fn: () => { void outbox.flush().catch(() => {}).then(() => updateSW(true)) } },
+    })
   },
   onRegisterError(err) {
     console.warn('SW registration failed', err)

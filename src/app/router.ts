@@ -1,4 +1,4 @@
-// Hash router: '#/' today, '#/food', '#/lift', '#/work', '#/day', '#/settings', '#/settings/shortcut', ...
+// Hash router: '#/' today, '#/food', '#/lift', '#/work', '#/day' (+ '#/day/YYYY-MM-DD'), '#/settings', '#/settings/shortcut', ...
 import { signal } from '@preact/signals'
 
 export type Route =
@@ -6,7 +6,7 @@ export type Route =
   | { name: 'food' }
   | { name: 'lift' }
   | { name: 'work' }
-  | { name: 'day' }
+  | { name: 'day'; date: string | null }
   | { name: 'settings' }
   | { name: 'shortcut' }
   | { name: 'taps' }
@@ -22,12 +22,14 @@ export const TABS: { route: Route['name']; hash: string; label: string }[] = [
 
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#/, '').replace(/\/+$/, '') || '/'
+  const day = /^\/day\/(\d{4}-\d{2}-\d{2})$/.exec(path)
+  if (day) return { name: 'day', date: day[1] ?? null }
   switch (path) {
     case '/': return { name: 'today' }
     case '/food': return { name: 'food' }
     case '/lift': return { name: 'lift' }
     case '/work': return { name: 'work' }
-    case '/day': return { name: 'day' }
+    case '/day': return { name: 'day', date: null }
     case '/settings': return { name: 'settings' }
     case '/settings/shortcut': return { name: 'shortcut' }
     case '/settings/taps': return { name: 'taps' }

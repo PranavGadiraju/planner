@@ -1,5 +1,5 @@
 // Settings: token + test, preferences, links, and local-cache tools.
-import { useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { clear, entries, set } from 'idb-keyval'
 import type { Settings as SettingsT } from '@shared/types'
 import { SubBar } from '../components/TopBar'
@@ -38,12 +38,23 @@ function isStandalone(): boolean {
 }
 
 function TokenSection() {
-  const [draft, setDraft] = useState(token.value ?? '')
+  const stored = token.value ?? ''
+  const [draft, setDraft] = useState(stored)
+  const [touched, setTouched] = useState(false)
   const [show, setShow] = useState(false)
   const [status, setStatus] = useState<{ kind: 'ok' | 'bad' | 'busy'; text: string } | null>(null)
   const state = syncState.value
 
-  const commit = () => { if (draft.trim() !== (token.value ?? '')) setToken(draft) }
+  // The token can arrive after mount (restored from IndexedDB); follow it until the user starts typing.
+  useEffect(() => { if (!touched) setDraft(stored) }, [stored, touched])
+
+  const edit = (v: string) => { setDraft(v); setTouched(true) }
+  const commit = () => {
+    // An untouched empty field (nothing restored yet) must not wipe a token that is still loading.
+    if (!touched && !draft.trim()) return
+    if (draft.trim() !== stored) setToken(draft)
+    setTouched(false)
+  }
   const test = async () => {
     commit()
     setStatus({ kind: 'busy', text: 'Testing…' })
@@ -74,7 +85,7 @@ function TokenSection() {
             type={show ? 'text' : 'password'}
             placeholder="Paste APP_TOKEN"
             value={draft}
-            onInput={(e) => setDraft((e.currentTarget as HTMLInputElement).value)}
+            onInput={(e) => edit((e.currentTarget as HTMLInputElement).value)}
             onBlur={commit}
             autocomplete="off"
             autocapitalize="off"
@@ -94,17 +105,31 @@ function TokenSection() {
   )
 }
 
+interface PrefsForm { tz: string; unit: SettingsT['weight_unit']; kcal: string; protein: string; carb: string; fat: string; bed: string; wind: string; grace: string }
+function formFrom(s: SettingsT): PrefsForm {
+  return {
+    tz: s.tz, unit: s.weight_unit, kcal: String(s.targets.kcal), protein: String(s.targets.protein_g), carb: String(s.targets.carb_g),
+    fat: String(s.targets.fat_g), bed: s.bed_target, wind: String(s.winddown_min), grace: String(s.late_grace_min),
+  }
+}
+
 function PrefsSection() {
   const s = settings.value
-  const [tz, setTz] = useState(s.tz)
-  const [unit, setUnit] = useState<SettingsT['weight_unit']>(s.weight_unit)
-  const [kcal, setKcal] = useState(String(s.targets.kcal))
-  const [protein, setProtein] = useState(String(s.targets.protein_g))
-  const [carb, setCarb] = useState(String(s.targets.carb_g))
-  const [fat, setFat] = useState(String(s.targets.fat_g))
-  const [bed, setBed] = useState(s.bed_target)
-  const [wind, setWind] = useState(String(s.winddown_min))
-  const [grace, setGrace] = useState(String(s.late_grace_min))
+  const [form, setForm] = useState<PrefsForm>(() => formFrom(s))
+  const [touched, setTouched] = useState(false)
+  // Settings load after mount on a cold start at #/settings: mirror the store until the user edits something.
+  useEffect(() => { if (!touched) setForm(formFrom(s)) }, [s, touched])
+  const { tz, unit, kcal, protein, carb, fat, bed, wind, grace } = form
+  const edit = (patch: Partial<PrefsForm>) => { setForm((f) => ({ ...f, ...patch })); setTouched(true) }
+  const setTz = (v: string) => edit({ tz: v })
+  const setUnit = (v: SettingsT['weight_unit']) => edit({ unit: v })
+  const setKcal = (v: string) => edit({ kcal: v })
+  const setProtein = (v: string) => edit({ protein: v })
+  const setCarb = (v: string) => edit({ carb: v })
+  const setFat = (v: string) => edit({ fat: v })
+  const setBed = (v: string) => edit({ bed: v })
+  const setWind = (v: string) => edit({ wind: v })
+  const setGrace = (v: string) => edit({ grace: v })
 
   const num = (v: string, fallback: number) => { const n = Number(v); return Number.isFinite(n) && v.trim() !== '' ? n : fallback }
   const patch = (): Partial<SettingsT> => {
@@ -125,6 +150,7 @@ function PrefsSection() {
     if (!validTz) { toast('Unknown timezone', { kind: 'danger' }); return }
     const p = patch()
     await saveSettings(p)
+    setTouched(false) // the store now carries the saved values; follow it again
     toast('Settings saved')
     if (p.bed_target || p.winddown_min !== undefined) {
       const b = p.bed_target ?? s.bed_target

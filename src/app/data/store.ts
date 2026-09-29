@@ -1,11 +1,11 @@
 // App state: the Today payload, settings and sync state as signals, plus the local write helpers that
 // mirror the shared state machines and push idempotent upserts through the outbox.
-import { batch, computed, signal } from '@preact/signals'
+import { batch, computed, effect, signal } from '@preact/signals'
 import { get, set } from 'idb-keyval'
 import { DEFAULT_SETTINGS } from '@shared/types'
 import type { Checkin, RoutineItem, RoutineLog, Settings, Sleep, TimeBlock, TodayPayload } from '@shared/types'
 import { applyRoutineTap, type RoutineTapAction } from '@shared/routine'
-import { applyBedTap, applyWake, nightOf, type BedTapAction } from '@shared/sleep'
+import { OPEN_SLEEP_MAX_MS, applyBedTap, applyWake, nightOf, type BedTapAction } from '@shared/sleep'
 import { addDays, localDay } from '@shared/tz'
 import { ApiError, apiGet, authFailed, hasToken, offline, readCache, token } from './api'
 import * as outbox from './outbox'
@@ -35,36 +35,55 @@ export const localToday = computed(() => localDay(now.value, tz.value))
 
 // ---- loading --------------------------------------------------------------------------------------
 
-export async function loadToday(): Promise<void> {
+let inflightLoad: Promise<void> | null = null
+/** Fetch /api/today (cache fallback) and apply it. Concurrent callers share one request. */
+export function loadToday(): Promise<void> {
+  if (inflightLoad) return inflightLoad
+  inflightLoad = loadTodayOnce().finally(() => { inflightLoad = null })
+  return inflightLoad
+}
+
+async function loadTodayOnce(): Promise<void> {
   if (!hasToken()) {
     loadError.value = null
     const hit = await readCache<TodayPayload>('today')
-    if (hit) applyPayload(hit.data, hit.fetchedAt)
+    if (hit) await applyPayload(hit.data, hit.fetchedAt, true)
     return
   }
   loading.value = true
   try {
+    // Snapshot the queue first: rows flushed while the request is in flight may not be in the answer yet.
+    const queuedBefore = await outbox.peek()
     const r = await apiGet<TodayPayload>('/api/today', 'today')
-    applyPayload(r.data, r.fetchedAt)
+    await applyPayload(r.data, r.fetchedAt, r.cached, queuedBefore)
     loadError.value = null
   } catch (err) {
     loadError.value = err instanceof ApiError ? err.message : 'Cannot reach the server'
     if (!today.value) {
       const hit = await readCache<TodayPayload>('today')
-      if (hit) applyPayload(hit.data, hit.fetchedAt)
+      if (hit) await applyPayload(hit.data, hit.fetchedAt, true)
     }
   } finally {
     loading.value = false
   }
 }
 
-function applyPayload(p: TodayPayload, at: string): void {
+/**
+ * Apply a payload, then replay every queued (unsent) row on top of it so an offline refresh never hides an
+ * optimistic change. A cached payload older than the one already on screen is ignored.
+ */
+async function applyPayload(p: TodayPayload, at: string, cached: boolean, alsoReplay: outbox.OutboxItem[] = []): Promise<void> {
+  if (cached && today.value && fetchedAt.value && at <= fetchedAt.value) return
   batch(() => {
     today.value = p
     settings.value = { ...DEFAULT_SETTINGS, ...p.settings, targets: { ...DEFAULT_SETTINGS.targets, ...p.settings.targets } }
     fetchedAt.value = at
   })
   mergeRoutineItems(p.routine_items)
+  const queued = await outbox.peek()
+  const seen = new Set(queued.map((q) => q.id))
+  const replay = [...alsoReplay.filter((q) => !seen.has(q.id)), ...queued]
+  if (replay.length) batch(() => { for (const it of replay) applyLocal(it.table, it.row) })
 }
 
 export async function loadSettingsFromServer(): Promise<Settings> {
@@ -95,7 +114,8 @@ function mergeRoutineItems(rows: RoutineItem[]): void {
 
 // ---- optimistic local mirror -----------------------------------------------------------------------
 
-outbox.onEnqueue((table, row) => {
+/** Mirror one queued row into the Today payload (and settings). Idempotent, so replaying the queue is safe. */
+export function applyLocal(table: string, row: Record<string, unknown>): void {
   const p = today.value
   switch (table) {
     case 'routine_log': {
@@ -135,15 +155,22 @@ outbox.onEnqueue((table, row) => {
     case 'settings': {
       const { key, value } = row as { key: keyof Settings; value: string }
       try {
-        settings.value = { ...settings.value, [key]: JSON.parse(value) }
-        if (p) today.value = { ...p, settings: settings.value }
+        const parsed = JSON.parse(value) as unknown
+        settings.value = { ...settings.value, [key]: parsed }
+        if (p) {
+          // The timezone decides what "today" is everywhere, so the payload's tz follows the setting at once.
+          const tzNext = key === 'tz' && typeof parsed === 'string' && parsed ? parsed : p.tz
+          today.value = { ...p, settings: settings.value, tz: tzNext }
+        }
       } catch { /* ignore */ }
       return
     }
     default:
       return
   }
-})
+}
+
+outbox.onEnqueue(applyLocal)
 
 // ---- write helpers ---------------------------------------------------------------------------------
 
@@ -151,12 +178,19 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
+/**
+ * The sleep row a wake signal may close: open (no wake_ts), belonging to today or yesterday by calendar day
+ * (not by nightOf, which would shift at noon), and not so old that it is clearly a forgotten tap.
+ */
 function openSleepRow(p: TodayPayload, at: Date): Sleep | null {
-  const tonight = nightOf(at, p.tz)
-  const lastNight = addDays(tonight, -1)
+  const day = localDay(at, p.tz)
+  const yesterday = addDays(day, -1)
   const rows = [p.sleep.open, p.sleep.tonight, p.sleep.last_night]
   for (const r of rows) {
-    if (r && !r.deleted_at && !r.wake_ts && (r.night_of === tonight || r.night_of === lastNight)) return r
+    if (!r || r.deleted_at || r.wake_ts) continue
+    if (r.night_of !== day && r.night_of !== yesterday) continue
+    if (at.getTime() - new Date(r.bed_ts).getTime() > OPEN_SLEEP_MAX_MS) continue
+    return r
   }
   return null
 }
@@ -293,12 +327,25 @@ export async function saveSettings(patch: Partial<Settings>): Promise<void> {
     if (value === undefined) continue
     await outbox.enqueue('settings', { key, value: JSON.stringify(value), updated_at: ts })
   }
+  // The server's idea of today (and every local_day) depends on the settings, so refresh once the write lands.
+  void outbox.flush().then(() => loadToday(), () => loadToday())
 }
 
 export async function saveRoutineItems(rows: RoutineItem[]): Promise<void> {
   const ts = nowIso()
   for (const r of rows) await outbox.enqueue('routine_items', { ...r, updated_at: ts } as unknown as Record<string, unknown>)
 }
+
+// ---- token -------------------------------------------------------------------------------------------
+
+// A token arriving later (pasted in Settings, or restored from IndexedDB after localStorage was evicted) unblocks
+// everything: push what is queued and load today. Skips the initial value so start-up does not load twice.
+let seenToken = token.value
+effect(() => {
+  const t = token.value
+  if (t && t !== seenToken) { void outbox.flush(); void loadToday() }
+  seenToken = t
+})
 
 // ---- clock -------------------------------------------------------------------------------------------
 
