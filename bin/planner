@@ -47,11 +47,12 @@ Available now:
                           saved foods matching <q> (GET /api/foods?q=); --usda adds USDA candidates (generic, or --branded)
   eat --food <id|name> --grams N | --meal <id|name> [--scale S]  [--at HH:MM|ISO] [--slot breakfast|lunch|dinner|snack] [--note ...]
                           POST /api/food-log with a macro snapshot; an ambiguous name lists the candidates
-  session add --project <name|id> (--minutes N | --start HH:MM|ISO --end HH:MM|ISO) [--note ...] [--day YYYY-MM-DD]
+  session add --project <name|id> (--minutes N | --start HH:MM --end HH:MM) [--note ...] [--day YYYY-MM-DD]
+                          times are local HH:MM on --day (default today) or zoned ISO instants (…Z / …-04:00)
                           POST /api/sessions (creates the project if unknown)
   set add (--workout <id> | --new "Push") --exercise <name|id> --reps N --weight W [--sets K] [--warmup]
                           POST /api/sets: K sets of N reps at W (creates the exercise / workout if asked)
-  block add --from HH:MM|ISO --to HH:MM|ISO --category <cat> [--label ...] [--project <name|id>] [--day YYYY-MM-DD]
+  block add --from HH:MM --to HH:MM --category <cat> [--label ...] [--project <name|id>] [--day YYYY-MM-DD]
                           POST /api/time-blocks (cat: sleep|workout|study|routine|meal|chores|social|commute|rest|phone|other)
 
 Global: --json prints the raw API response. --help / -h prints this.

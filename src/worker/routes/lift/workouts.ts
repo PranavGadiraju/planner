@@ -75,7 +75,7 @@ export async function template(c: RouteContext): Promise<Response> {
 const LAST_SETS_SQL =
   'SELECT s.*, w.local_day, w.name AS workout_name FROM sets s JOIN workouts w ON w.id = s.workout_id ' +
   'WHERE s.exercise_id = ? AND s.is_warmup = 0 AND s.deleted_at IS NULL AND w.deleted_at IS NULL AND (? IS NULL OR s.workout_id != ?) ' +
-  'ORDER BY s.ts DESC, s.set_no DESC LIMIT 10'
+  'ORDER BY s.ts DESC, s.set_no DESC LIMIT 30' // enough that the current workout's own sets never hide the last session
 // Best e1RM per workout, top two: bests[0] is the best ever; the best outside any one workout is bests[0] or bests[1].
 const BESTS_SQL =
   `SELECT s.workout_id, MAX(${e1rm('s')}) AS best FROM sets s JOIN workouts w ON w.id = s.workout_id ` +
