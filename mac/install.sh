@@ -2,6 +2,8 @@
 # planner: install the Mac automation pieces for the current user.
 #   - symlinks mac/screentime_push.py to ~/bin/screentime_push.py
 #   - copies the two LaunchAgent plists into ~/Library/LaunchAgents with __HOME__ / __REPO__ / __PLANNER_URL__ filled in
+#     (plain str.replace + XML escaping in /usr/bin/python3, so a home folder, repo path or URL containing
+#     &, |, \ or < is written correctly; sed would misread those in its replacement text)
 #   - prints the Full Disk Access + Keychain steps and the launchctl commands (run them yourself, or pass --load)
 #
 # Usage:  sh mac/install.sh [--url https://planner.<sub>.workers.dev] [--load]
@@ -16,7 +18,7 @@ while [ $# -gt 0 ]; do
     --url) URL="$2"; shift 2 ;;
     --url=*) URL="${1#--url=}"; shift ;;
     --load) LOAD=1; shift ;;
-    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -40,7 +42,18 @@ echo "linked  $HOME/bin/screentime_push.py -> $REPO/mac/screentime_push.py"
 for name in com.pranav.planner-screentime com.pranav.planner-backup; do
   src="$REPO/mac/$name.plist"
   dst="$AGENTS/$name.plist"
-  sed -e "s|__HOME__|$HOME|g" -e "s|__REPO__|$REPO|g" -e "s|__PLANNER_URL__|$URL|g" "$src" > "$dst"
+  # Not sed: & and \ (and the delimiter) are special in a sed replacement, and any of them can appear in a
+  # path or URL. The values are XML-escaped because they land inside <string> elements.
+  /usr/bin/python3 - "$src" "$dst" "$HOME" "$REPO" "$URL" <<'PY'
+import sys
+from xml.sax.saxutils import escape
+src, dst, home, repo, url = sys.argv[1:6]
+text = open(src, encoding="utf-8").read()
+for placeholder, value in (("__HOME__", home), ("__REPO__", repo), ("__PLANNER_URL__", url)):
+    text = text.replace(placeholder, escape(value))
+with open(dst, "w", encoding="utf-8") as f:
+    f.write(text)
+PY
   chmod 644 "$dst"
   plutil -lint "$dst" >/dev/null
   echo "wrote   $dst"
@@ -73,6 +86,9 @@ Next steps (one time):
      launchctl bootstrap gui/$UID_NUM $AGENTS/com.pranav.planner-backup.plist
      launchctl kickstart -k gui/$UID_NUM/com.pranav.planner-screentime     # run now
      tail -n 20 ~/Library/Logs/planner-screentime.log ~/Library/Logs/planner-screentime.err
+   The backup agent only runs on Sundays at 09:30 (no RunAtLoad). To take a first backup now, either:
+     launchctl kickstart -k gui/$UID_NUM/com.pranav.planner-backup         # through launchd, logs in ~/Library/Logs/planner-backup.*
+     sh $REPO/mac/backup.sh                                                # or directly in this shell
    To reload after editing a plist: launchctl bootout gui/$UID_NUM/<label> then bootstrap again.
 EOF
 

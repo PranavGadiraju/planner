@@ -11,7 +11,7 @@ milestone.
 |---|---|
 | `src/worker/` | Worker: router, auth/roles, routes, day builder, cron |
 | `src/app/` | Preact PWA (screens, charts, outbox/cache) |
-| `src/shared/` | `types.ts`, `tz.ts` (local day via Intl), `routine.ts` and `sleep.ts` (state machines shared by Worker and app), `nutrition.ts` |
+| `src/shared/` | `types.ts`, `tz.ts` (local day via Intl), `routine.ts` and `sleep.ts` (state machines shared by Worker and app), `day.ts` (`buildDay`: the 24 h timeline behind `GET /api/day/:date`, the Day tab and `planner day`), `nutrition.ts` |
 | `test/` | vitest for the shared modules and `buildDay` |
 | `bin/planner` | zero-dependency Node CLI (this is how you talk to the deployed app) |
 | `mac/` | screen-time push script, LaunchAgent plists, backup + install scripts |
@@ -28,7 +28,9 @@ npm run deploy           # vite build && wrangler deploy
 ```
 
 Run all three checks (`typecheck`, `test`, and a `--dry-run` / `--help` of any script you touched) before you say
-you are done.
+you are done. After touching the Worker also run `bash scripts/smoke.sh` (isolated `wrangler dev` + curl of every
+route with each token role); after touching `mac/` run `bash -n mac/*.sh`, `plutil -lint mac/*.plist` and
+`/usr/bin/python3 -m py_compile mac/screentime_push.py`.
 
 ## Conventions that must hold
 
@@ -61,22 +63,36 @@ from `~/.config/planner/config.json` (`{"url": "..."}`, or `PLANNER_URL`) and th
 `PLANNER_TOKEN`). Exit codes: 0 ok, 1 network/auth/server error, 2 usage or "not available until milestone N".
 Add `--json` when you need to parse the response instead of the pretty text.
 
-Milestone 1 (now):
+Available now (milestones 1-2):
 
 | Command | Use it to |
 |---|---|
 | `planner today` | answer "how is today going": routine circles, sleep + streak, running timers, automation health |
+| `planner day [YYYY-MM-DD\|today\|yesterday]` | answer "how did yesterday go" (or any day): category totals as a small h m table, then one `HH:MM–HH:MM  category  label (source)` row per block, then the gaps. `today`/`yesterday` are the server's local day |
 | `planner me` | check the URL + token work; prints tz and the server's idea of today |
 | `planner health` | liveness and the automation_health rows (Mac push, NFC, cron) |
 | `planner tap <item> [--at ISO]` | log a routine/bed/wake tap as the app role (same state machine as the stickers) |
 | `planner taps` | last 100 tap_log rows to debug a sticker that "did nothing" |
 | `planner config --url URL` | first-time setup |
 
-Later milestones (they exist as stubs that exit 2 until then): `food add --json`, `food search`, `eat`, `day`,
+Later milestones (they exist as stubs that exit 2 until then): `food add --json`, `food search`, `eat`,
 `block add` (M3); `session add`, `set add` (M5); `rollup`, `export` (M7); `screentime phone` (M8).
 
-When the user asks about a day, prefer `planner today` / `planner day <date>` (M3+) over guessing; when they ask
-to log something, show what you are about to send and confirm before posting anything that is not idempotent.
+When the user asks how today is going, run `planner today`. When they ask how yesterday (or any day) went, run
+`planner day yesterday` / `planner day YYYY-MM-DD` and answer from its output; never guess. Reading that output:
+
+- `unknown` means no source claimed those minutes (not in bed, no routine tap, no workout/session, nothing
+  filled by hand). It is "nothing told the planner", not "wasted"; before the Mac push (M6) most of a desk day is
+  Unknown. The **Gaps** list is the Unknown runs of 5 min or more; the user fills them by tapping in the Day tab
+  (`planner block add` arrives with M3).
+- A routine block with `(routine)` and exactly the item's default minutes usually means only the first tap
+  happened; the second tap (3+ min later) replaces the default with the real duration.
+- `Sleep? (sleep?)` is an open night drawn as an 8 h guess; the user should set the wake time in the app.
+- Study/mac sub-rows in the totals are raw seconds from the source tables and can exceed the painted minutes.
+- `--json` returns the raw `buildDay` result (`src/shared/day.ts`) when you need the numbers.
+
+When they ask to log something, show what you are about to send and confirm before posting anything that is not
+idempotent.
 
 ## Recipe: nutrition label -> food (`/label`, arrives with milestone 3)
 

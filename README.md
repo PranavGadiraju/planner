@@ -12,6 +12,8 @@ backed by **D1 (SQLite)** and one Cron Trigger. No credit card, nothing pauses. 
 The full design (schema, API, algorithms, screens, milestones) is in [`docs/plan.md`](docs/plan.md).
 Milestone 1 ships: Worker auth + `/api/health`, `/api/me`, `/api/tap`, `/api/write`, `/api/today`, the tap log,
 automation health, the PWA shell with Today and Settings, the `planner` CLI, and the Mac automation files.
+Milestone 2 adds the day view: `buildDay`, `GET /api/day/:date`, the **Day** tab with its 24-hour timeline and
+gap filling, the Today ring, and `planner day` (see [section 9](#9-milestone-2-day-view)).
 
 ---
 
@@ -49,11 +51,17 @@ npm run deploy
 ### Install the app
 
 - **iPhone:** open the URL in Safari, Share > **Add to Home Screen**. Open it from the Home Screen (that is the
-  installed, full-screen version), go to Settings, paste `APP_TOKEN`, tap **Test**.
+  installed, full-screen version), go to Settings, paste `APP_TOKEN` into **App token**, tap **Test**. Test calls
+  `GET /api/me` with that token and shows `OK · role app · <tz> · today <date>` (or `Token rejected (401)`).
 - **Mac:** open the URL in Safari, **File > Add to Dock**. Paste the same `APP_TOKEN` in Settings.
 
-The token stays on the device (localStorage, mirrored in IndexedDB). Rotate any token with
-`npx wrangler secret put <NAME>` and re-paste it where it is used; the others keep working.
+The token stays on the device (localStorage, mirrored in IndexedDB: iOS evicts localStorage more eagerly, and
+the app restores the token from the IndexedDB copy on launch; **Reset local cache** in Settings keeps it too).
+Rotate any token with `npx wrangler secret put <NAME>` and
+re-paste it where it is used; the others keep working. Settings also links to the routine editor
+(**Routine items**, `#/settings/routine`), the **Shortcut & NFC setup** page (`#/settings/shortcut`) and the
+**NFC tap log** (`#/settings/taps`); the sections below refer to those pages. After a deploy the installed app
+shows a "new version is ready" toast with a **Reload** button.
 
 ### CLI on the Mac
 
@@ -63,6 +71,7 @@ planner config --url https://planner.<your-subdomain>.workers.dev
 security add-generic-password -U -a "$USER" -s planner-app-token -w    # prompts; paste APP_TOKEN
 planner me
 planner today
+planner day yesterday
 ```
 
 `planner --help` lists everything; see [section 5](#5-cli-binplanner).
@@ -90,7 +99,11 @@ Checks: `npm run typecheck` (app and worker tsconfigs), `npm test` (vitest). Try
 curl -s localhost:8787/api/health
 curl -s -X POST localhost:8787/api/tap -H 'Authorization: Bearer dev-shortcut' -H 'content-type: application/json' -d '{"item":"shower"}'
 PLANNER_URL=http://localhost:8787 PLANNER_TOKEN=dev-app node bin/planner today
+PLANNER_URL=http://localhost:8787 PLANNER_TOKEN=dev-app node bin/planner day today
 ```
+
+`bash scripts/smoke.sh` starts an isolated `wrangler dev` on a throw-away local D1, curls every route with each
+token role and stops it again; run it after touching the Worker.
 
 ---
 
@@ -112,14 +125,19 @@ Create it once; every sticker automation calls it with a different input, so the
    (**Show More**): Method **POST**; Headers **+** `Authorization` = `Bearer <SHORTCUT_TOKEN>`; Request Body
    **JSON** > Add new field > **Text**, key `item`, value: tap the field and pick the **Shortcut Input** variable.
 3. Add **Get Dictionary Value**: key `ok` from **Contents of URL**.
-4. Add **If**: *Dictionary Value* **is not** *true* (booleans show as a toggle; make sure it reads "is not true").
-   Inside the If: **Show Notification** with title `Planner failed` and body `Shortcut Input`. This is the only
-   way a broken token, a typo in a slug, or a Worker error is visible: Get Contents of URL does not fail on a
-   4xx/401 body, it just returns it, and then `ok` is missing or false.
-5. Optional, in the **Otherwise** branch: **Get Dictionary Value** key `message` from Contents of URL, then
-   **Show Notification** with that value ("Shower started 07:42", "Run done · 41 min", "In bed 23:20 (+20 min) · streak 4").
+4. Add **If**: *Dictionary Value* **is** *true* (booleans show as a toggle; make sure it reads "is true", not
+   "is not true"). Inside the If, optionally: **Get Dictionary Value** key `message` from Contents of URL, then
+   **Show Notification** with that value ("Shower started 07:42", "Morning run done · 41 min",
+   "In bed 23:20 (+20 min) · streak 4").
+5. In the **Otherwise** branch: **Show Notification** with title `Planner failed` and body `Shortcut Input`, so it
+   reads "Planner failed: shower". The condition is deliberately *is true* rather than *is not true*: a 401 body
+   has no `ok` key at all, a non-JSON answer has no dictionary, and a missing or empty value would not satisfy
+   "is not true" on every iOS version, whereas it never satisfies "is true", so every failure lands in Otherwise.
+   Get Contents of URL does not fail on a 4xx/401 body, it just returns it; this notification is the only way a
+   broken token, a typo in a slug, or a Worker error is visible.
 6. Run it once manually (play button, type `shower` when asked for input). When iOS asks to allow the shortcut to
-   send data to your Worker, choose **Always Allow**. Check the tap landed: `planner taps` or Settings > tap log.
+   send data to your Worker, choose **Always Allow**. Check the tap landed: `planner taps` or Settings >
+   **NFC tap log** (`#/settings/taps`).
 
 ### Six NFC automations
 
@@ -133,8 +151,9 @@ For each of `shower`, `run`, `stretch`, `shoulders`, `journal`, `bed`:
    slug (`shower`, `run`, ..., `bed`). **Done**.
 
 Slugs must match `routine_items.id` (the seeded five above) or the special items `bed`, `wake`, `winddown`.
-Editing routine items in Settings shows the exact slug to use; the Settings **Shortcut setup** page repeats this
-recipe with your URL filled in.
+Settings > **Routine items** (`#/settings/routine`) shows each item's slug next to its name (a slug cannot change
+after creation); Settings > **Shortcut & NFC setup** (`#/settings/shortcut`) repeats this recipe with your URL
+filled in and a copy button for the URL and every slug.
 
 **The gesture:** raise the phone (Face ID unlocks it), touch the top edge to the sticker for about a second.
 Nothing opens; the POST goes out in the background. The screen must be on and the phone must have been unlocked
@@ -149,8 +168,9 @@ flipped automations back to "Ask"). Personal automations do not sync via iCloud:
 1. Shortcuts > **Automation** > **+** > **Time of Day** > set `bed_target - winddown_min` (with the defaults
    23:00 and 45 that is **22:15**) > **Daily** > **Next**.
 2. **Run Immediately**, then add **Show Notification**: "Wind down, bed by 23:00".
-3. Optional second action: **Run Shortcut** > **Planner Tap** with input `winddown`. The server writes nothing for
-   this item; the Shortcut's success notification then shows the streak line ("Wind down · streak 4 · last night +20").
+3. Optional second action: **Run Shortcut** > **Planner Tap** with input `winddown`. The server changes no routine
+   or sleep state for `winddown`; it only records the tap in the tap log (which also proves the automation fired).
+   The Shortcut's success notification then shows the streak line ("Wind down · streak 4 · last night +20 min").
 4. This time is set by hand: when you change the bed target or wind-down minutes in Settings, the app reminds you
    to edit this automation.
 
@@ -218,7 +238,8 @@ launchctl kickstart -k gui/$(id -u)/com.pranav.planner-screentime      # run now
 tail -n 30 ~/Library/Logs/planner-screentime.log ~/Library/Logs/planner-screentime.err
 ```
 
-The agent runs every hour at :05 and at login (`RunAtLoad`). Reload after editing the plist with
+The agent runs every hour at :05 and at login (`RunAtLoad`; the backup agent in section 6 deliberately has no
+`RunAtLoad`). Reload after editing the plist with
 `launchctl bootout gui/$(id -u)/com.pranav.planner-screentime` and bootstrap again. `sh mac/install.sh --load`
 does the bootstrap/kickstart for you.
 
@@ -253,12 +274,13 @@ token from `PLANNER_TOKEN` or the Keychain item `planner-app-token`. It never pr
 | `planner me` | validate URL + token; tz, server time, today |
 | `planner health` | `/api/health` liveness plus the automation_health rows |
 | `planner today [--json]` | routine state, sleep card + streak, running workout/session, check-ins, automation health |
+| `planner day [date] [--json]` | one day as text (`GET /api/day/:date`): the category totals as a small table (h m, share), then the timeline as `HH:MM–HH:MM  category  label (source)` rows, then the gaps. `date` is `YYYY-MM-DD`, `today` (default) or `yesterday`, in the server's timezone |
 | `planner tap <item> [--at ISO]` | log a tap as the app role (same state machine as the stickers) |
 | `planner taps [--json]` | last 100 tap_log rows, newest first |
 | `planner config [--url URL]` | show / set the Worker URL |
 
 Later milestones (stubs that print "not available until milestone N" and exit 2 today): `food add --json`,
-`food search`, `eat`, `day`, `block add` (M3); `session add`, `set add` (M5); `rollup`, `export` (M7);
+`food search`, `eat`, `block add` (M3); `session add`, `set add` (M5); `rollup`, `export` (M7);
 `screentime phone` (M8). `CLAUDE.md` explains how Claude Code uses the CLI and the `/label` and `/screentime`
 recipes.
 
@@ -268,11 +290,14 @@ Exit codes: 0 ok, 1 error (cannot reach the Worker, 401/403, server error), 2 us
 
 ## 6. Backups
 
-- **Weekly dump on the Mac:** `mac/install.sh` installs `com.pranav.planner-backup` (Sundays 09:30, and once at
-  load), which runs `mac/backup.sh` from the repo directory:
+- **Weekly dump on the Mac:** `mac/install.sh` installs `com.pranav.planner-backup`, which runs `mac/backup.sh`
+  from the repo directory **on Sundays at 09:30** and only then (no `RunAtLoad`: a D1 export at every login
+  would be wrong; launchd runs a missed slot when the Mac next wakes). The script does
   `npx wrangler d1 export planner --remote --output ~/planner-backups/<date>.sql` and keeps the newest 12.
-  Load it with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.pranav.planner-backup.plist`;
-  run by hand with `sh mac/backup.sh`; logs in `~/Library/Logs/planner-backup.log`.
+  Load it with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.pranav.planner-backup.plist`; loading
+  exports nothing by itself. Run it once by hand to check it works, either through launchd
+  (`launchctl kickstart -k gui/$(id -u)/com.pranav.planner-backup`, then read `~/Library/Logs/planner-backup.log`
+  and `.err`) or directly (`sh mac/backup.sh`).
 - **Restore** into a fresh database: `npx wrangler d1 execute planner --remote --file ~/planner-backups/<date>.sql`.
 - **D1 Time Travel** keeps 7 days of point-in-time restore: `npx wrangler d1 time-travel restore planner --timestamp <ISO>`.
 - **JSON export** (`GET /api/export`, `planner export`) arrives with milestone 7.
@@ -288,7 +313,7 @@ Exit codes: 0 ok, 1 error (cannot reach the Worker, 401/403, server error), 2 us
 | `401` from the app, CLI or Shortcut | the token does not match the Worker secret; re-paste it (Settings, Keychain `planner-app-token`, or the Shortcut header). Secrets set with `wrangler secret put` take effect on the next request |
 | `403` | right token, wrong route: the Shortcut token may only call `/api/tap`, the Mac token only `/api/screentime` |
 | `404` from the Mac script | `/api/screentime` is not deployed yet (milestone 6) or the URL in the plist is wrong (`PLANNER_URL` should be the site root, without `/api/...`) |
-| "Planner failed: shower" notification on the phone | the Worker rejected the tap: check `planner taps` (a 400 leaves a tap_log row with the reason), the slug spelling, and the token in the Shortcut |
+| "Planner failed: shower" notification on the phone | the Worker did not answer `ok: true`. Run `planner taps` (or open Settings > NFC tap log): a 400 leaves a tap_log row with result `unknown_item`, so the log shows exactly which slug the Shortcut sent; compare it with the slugs in Settings > Routine items. No new row at all means the request never got past auth: a 401 (re-paste `SHORTCUT_TOKEN` in the Shortcut's header), a wrong URL, or no network |
 | A sticker tap does nothing at all | Notify When Run on? Screen on and phone unlocked once since boot? Camera/Wallet closed? Open the automation: after an iOS update it may say "Ask Before Running" again |
 | Second tap says "Already done" / "duplicate" | taps < 2 min apart are duplicates, 2-3 min are ignored, >= 3 min finish the item; edit or undo from Today |
 | `Operation not permitted` / `authorization denied` reading knowledgeC.db | Full Disk Access is not applied to `/usr/bin/python3`; drag it into the FDA list again and run the verification one-liner; Terminal needs FDA too for manual tests (relaunch it after granting) |
@@ -297,24 +322,73 @@ Exit codes: 0 ok, 1 error (cannot reach the Worker, 401/403, server error), 2 us
 | `launchctl kickstart` runs but the log is empty | look at the `.err` file next to it; `plutil -lint` the plist; the script path in `ProgramArguments` must exist (`ls -l ~/bin/screentime_push.py`) |
 | `npm run dev:worker` complains about `./dist` | run `npm run build` once so the assets directory exists |
 | Wrong "today" around midnight | the server computes local day in `TZ` from `wrangler.jsonc` (`America/New_York`) with Intl; change `vars.TZ` and the `tz` setting together |
-| App shows stale UI after a deploy | the PWA shows a "Reload for update" toast; or force-close and reopen the Home Screen app |
+| App shows stale UI after a deploy | the service worker fetches the new build on the next launch and the app shows a "new version is ready" toast with a **Reload** button; tap it, or force-close and reopen the Home Screen app |
 | `wrangler` says the database id is a placeholder | paste the id from `npx wrangler d1 create planner` into `wrangler.jsonc` |
 
 ---
 
-## 8. API summary (milestone 1)
+## 8. API summary (milestones 1-2)
 
 | Method + path | Role | Purpose |
 |---|---|---|
 | `GET /api/health` | none | `{ok, version, time, today}` |
 | `GET /api/me` | app | `{role, tz, server_time, today}` |
-| `POST /api/tap` `{item, ts?}` | shortcut, app | routine start/finish, `bed`, `wake`, `winddown`; server-timestamped for the shortcut role; every call logged to `tap_log` |
+| `POST /api/tap` `{item, ts?}` | shortcut, app | routine start/finish, `bed`, `wake`, `winddown` (tap log only); server-timestamped for the shortcut role; every call logged to `tap_log`, an unknown item is a 400 with `action: unknown_item` |
 | `POST /api/write` `{mutations:[{table, rows}]}` | app | batched idempotent upserts (max 200 rows) guarded by `updated_at`; past days marked dirty |
 | `GET /api/today` | app | routine items + today's log, sleep (tonight, last night, open, streak), check-in, running timers, health |
+| `GET /api/day/:date` | app | (M2) one local day from `buildDay`: `blocks[]`, `gaps[]`, `totals`, `mac_by_category`, `study_by_project`, `manual_by_category`, `markers[]`, `sleep_inferred`, `now_min`, `is_today` |
 | `GET /api/tap/log` | app | last 100 taps |
 | `GET /api/health/automations` | app | automation_health rows |
 | `GET /api/settings` | app | parsed settings (write them through `/api/write`, table `settings`) |
 
-Everything else in `docs/plan.md` (day chart, food, lifting, sessions, lookups, screentime, summaries, export,
-cron rollups) arrives in milestones 2-8 and returns 404 until then. The cron trigger currently only prunes
-`tap_log` to 500 rows.
+Everything else in `docs/plan.md` (food, lifting, sessions, lookups, screentime, summaries, export, cron rollups)
+arrives in milestones 3-8 and returns 404 until then. The cron trigger currently only prunes `tap_log` to 500
+rows.
+
+---
+
+## 9. Milestone 2: Day view
+
+The **Day** tab (`#/day`) and `planner day <date>` show the same thing: one local day (midnight to midnight in
+`settings.tz`, so 1380 or 1500 minutes on the two DST days) as a vertical timeline of blocks, the per-category
+totals and the list of gaps. It is computed on request by `buildDay` in `src/shared/day.ts` (the Worker's
+`GET /api/day/:date` and the app's optimistic rendering both call it; nothing is stored) in one pass over at most
+1500 minute cells, which keeps it inside the 10 ms CPU budget of the free plan.
+
+**How the timeline is built.** Every minute starts as Unknown. The sources are painted in a fixed order and a
+source may only paint minutes that are still Unknown, so the order is the precedence and no minute is ever counted
+twice: 1 manual `time_blocks` (always win), 2 sleep, 3 workouts, 4 study sessions, 5 routine taps, 6 Mac focus
+intervals (M6), 7 Mac hour totals for hours without intervals (M6), 8 phone hour totals (M8). On today, minutes
+after now do not exist yet and are not counted; a past day is scored in full. Runs of identical minutes become
+blocks; each block knows its `source` (`manual`, `sleep`, `sleep?`, `workout`, `session`, `routine`, `mac`,
+`mac-hours`, `phone`), which is what `planner day` prints in parentheses.
+
+**What Unknown means.** A minute is Unknown when no source claimed it: you were not in bed, no routine item was
+running, no workout or session was open, and you did not fill it by hand. It is "nothing told the planner",
+not "wasted". Until the Mac push lands (M6) most of a desk day is Unknown, which is expected. Unknown runs
+shorter than 5 minutes are absorbed into the previous block for display (they still count as Unknown in the
+totals); runs of 5 minutes or more are the **gaps**, drawn hatched and tappable. The Today ring shows
+"tracked / unknown" from the same numbers.
+
+**How gaps are filled.** Tap a gap in the Day tab to open the Fill sheet: pick a category (meal, chores, social,
+commute, rest, other, or sleep / workout / study with a project), adjust the start and end, add a label, save.
+That writes a `time_blocks` row through the outbox (`POST /api/write`), so it works offline and syncs later, and
+the ring and totals update immediately. Because manual blocks are painted first, a block you draw over something
+automatic overrides it; tap any block to see its source and times and to edit or delete it (deletes are
+tombstones, so a wrong fill is one tap to undo). From milestone 3 `planner block add --from --to --category`
+does the same from the CLI.
+
+**Why a routine block uses the default minutes until the second tap.** The first sticker tap only records
+`started_at`. Rather than growing minute by minute or not appearing at all, the block is drawn as
+`started_at + default_min` (the item's default in Settings > Routine items: 15 for the shower, 40 for the run,
+10 for the rest) so the timeline is useful right away. The second tap, 3 or more minutes later, sets `ended_at`
+and the block snaps to the real duration ("Morning run done · 41 min"). If you never tap again the default stands,
+which is usually close enough; long-press the circle on Today to correct either time. Items whose
+`chart_category` is `workout` (the run) count as workout minutes, the rest as routine.
+
+**Sleep on the chart.** A closed night is painted from `bed_ts` to `wake_ts`. An open night (nightstand tap, no
+wake yet) is painted up to now for the first 14 hours; after that it becomes an 8-hour "Sleep?" guess with
+`sleep_inferred: true`, which Today surfaces as "When did you wake?". Set the wake time and the block becomes real.
+
+`planner day yesterday` prints all of this as text (totals table, one row per block, the gaps) so Claude Code can
+answer "how did yesterday go" without a screenshot; `--json` gives the raw `buildDay` result.
