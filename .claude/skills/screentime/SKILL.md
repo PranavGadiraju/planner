@@ -5,9 +5,9 @@ description: Turn an iPhone Screen Time screenshot (Settings > Screen Time, day 
 
 # /screentime - log iPhone usage from a Screen Time screenshot
 
-Availability: `planner screentime phone` arrives in **milestone 8**. Until then `bin/planner screentime phone`
-exits 2 with "not available until milestone 8"; you can still read the screenshot and show the table, but say
-clearly that posting is not possible yet. (Mac usage never goes through this path: the hourly LaunchAgent in
+Availability: `planner screentime phone` is available (milestone 7). If the command exits 2 or 1 (server
+unreachable, token missing), you can still read the screenshot and show the table, but say clearly that
+posting did not happen. (Mac usage never goes through this path: the hourly LaunchAgent in
 `mac/` pushes it automatically.)
 
 ## What the screenshot gives
@@ -28,7 +28,7 @@ the **per-hour bar heights** and the **daily total**.
 5. **Sanity check**: the sum of your hourly minutes should be within about 5 minutes of the daily total printed at
    the top. If it is not, re-read the tallest bars, then show both numbers and let the user decide.
 6. **Show the table** (hour -> minutes, plus the sum vs the printed total) and **ask before posting**.
-7. **Post** (milestone 8+):
+7. **Post**:
 
    ```sh
    planner screentime phone --day 2026-09-28 --hours '{"7":12,"8":45,"9":60}'

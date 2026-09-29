@@ -111,7 +111,7 @@ Full version in `.claude/skills/label/SKILL.md`. Summary:
 6. Only after a yes: `planner food add --json '{...}'` (Worker converts, stores `source='claude'`, returns the
    row and any warning). Then offer `planner eat --food <id> --grams <n>`.
 
-## Recipe: iPhone Screen Time screenshot -> phone hours (`/screentime`, arrives with milestone 8)
+## Recipe: iPhone Screen Time screenshot -> phone hours (`/screentime`)
 
 Full version in `.claude/skills/screentime/SKILL.md`. Summary:
 

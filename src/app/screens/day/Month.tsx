@@ -145,15 +145,17 @@ function DayGrid({ days, rows, today, onOpen, onRefresh }: { days: string[]; row
           const unk = unknownShare(r)
           const cls = `month-cell${future ? ' future' : ''}${!future && !data ? ' nodata' : ''}${day === today ? ' is-today' : ''}`
           return (
-            <button key={day} type="button" class={cls} onClick={() => onOpen(day)} disabled={future} aria-label={`${day}: ${future ? 'upcoming' : data ? `${fmtPct(1 - unk)} tracked` : 'no data'}`}>
-              <span class="month-num num">{Number(day.slice(8))}</span>
-              {!future && (
-                <span class="month-bar">
-                  <span class="month-fill" style={`height:${((1 - unk) * 100).toFixed(0)}%`} />
-                </span>
-              )}
+            <div key={day} class={cls}>
+              <button type="button" class="month-cell-btn" onClick={() => onOpen(day)} disabled={future} aria-label={`${day}: ${future ? 'upcoming' : data ? `${fmtPct(1 - unk)} tracked` : 'no data'}`}>
+                <span class="month-num num">{Number(day.slice(8))}</span>
+                {!future && (
+                  <span class="month-bar">
+                    <span class="month-fill" style={`height:${((1 - unk) * 100).toFixed(0)}%`} />
+                  </span>
+                )}
+              </button>
               {r?.stale && <StaleRefresh day={day} onDone={onRefresh} size={11} />}
-            </button>
+            </div>
           )
         })}
       </div>

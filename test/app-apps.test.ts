@@ -64,10 +64,10 @@ describe('splitApps', () => {
 })
 
 describe('categoryRow', () => {
-  it('writes category and label only, never seen_seconds, with a fresh updated_at and no tombstone', () => {
+  it('writes only the category (never label or seen_seconds), with a fresh updated_at and no tombstone', () => {
     const at = new Date('2026-09-28T15:00:00.000Z')
     expect(categoryRow(row('com.apple.Safari', { label: 'Safari', seen_seconds: 999 }), 'browsing', at)).toEqual({
-      app_id: 'com.apple.Safari', label: 'Safari', category: 'browsing', updated_at: '2026-09-28T15:00:00.000Z', deleted_at: null,
+      app_id: 'com.apple.Safari', category: 'browsing', updated_at: '2026-09-28T15:00:00.000Z', deleted_at: null,
     })
   })
 })

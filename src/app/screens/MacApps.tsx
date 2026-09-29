@@ -38,10 +38,10 @@ export function MacApps() {
   const pick = async (row: AppCategoryRow, category: AppCategory) => {
     if (row.category === category) { setOpen(null); return }
     const at = new Date().toISOString()
-    setRows((cur) => cur ? cur.map((r) => (r.app_id === row.app_id ? { ...r, category, updated_at: at } : r)) : cur)
     setOpen(null)
     try {
       await setCategory(row, category)
+      setRows((cur) => cur ? cur.map((r) => (r.app_id === row.app_id ? { ...r, category, updated_at: at } : r)) : cur)
       toast(`${displayName(row)} → ${CATEGORY_NAMES[category]}`)
     } catch {
       toast('Could not queue the change', { kind: 'danger' })

@@ -60,7 +60,7 @@ export async function summary(c: RouteContext): Promise<Response> {
   return json(res)
 }
 
-/** POST /api/rollup {day} (app): rebuild one past day now (today is allowed but stays non-final). */
+/** POST /api/rollup {day} (app): rebuild one past day now (today is always computed live and never stored). */
 export async function rollup(c: RouteContext): Promise<Response> {
   const { env, now } = c
   const body = await readJson<unknown>(c.request)
@@ -69,7 +69,7 @@ export async function rollup(c: RouteContext): Promise<Response> {
   const today = localDay(now, env.TZ)
   const day = raw.toLowerCase() === 'yesterday' ? addDays(today, -1) : parseDayParam(raw, now, env.TZ)
   if (!day || !isCalendarDay(day)) throw new HttpError(400, 'day must be YYYY-MM-DD, today or yesterday')
-  if (day > today) throw new HttpError(400, 'day is in the future')
+  if (day >= today) throw new HttpError(400, 'today is computed live; rebuild yesterday or earlier')
   const s = await rebuildDay(env, day, now)
   return json({ day, summary: s })
 }

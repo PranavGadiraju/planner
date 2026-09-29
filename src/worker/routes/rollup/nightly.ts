@@ -2,7 +2,7 @@
 import { addDays } from '../../../shared/tz'
 
 export const AUTO_CLOSE_AFTER_MS = 3 * 3600_000
-export const DIRTY_DRAIN_CAP = 10
+export const DIRTY_DRAIN_CAP = 5
 export const TAP_LOG_KEEP = 500
 
 // SQLite's date functions accept ISO-8601 with a trailing Z; %f prints seconds with milliseconds, so the output
@@ -27,7 +27,7 @@ export const dirtyFromAutoCloseSql = (table: 'workouts' | 'sessions'): string =>
   'ON CONFLICT(local_day) DO UPDATE SET marked_at = excluded.marked_at'
 
 export const PRUNE_TAP_LOG_SQL = `DELETE FROM tap_log WHERE id NOT IN (SELECT id FROM tap_log ORDER BY id DESC LIMIT ${TAP_LOG_KEEP})`
-export const DIRTY_SQL = `SELECT local_day FROM dirty_days WHERE local_day < ? ORDER BY local_day LIMIT ${DIRTY_DRAIN_CAP}`
+export const DIRTY_SQL = `SELECT local_day FROM dirty_days WHERE local_day < ? AND local_day NOT IN (?, ?) ORDER BY local_day LIMIT ${DIRTY_DRAIN_CAP}`
 export const FINALISE_SQL = 'UPDATE day_summary SET final = 1 WHERE final = 0 AND local_day <= ?'
 export const HEALTH_OK_SQL =
   "INSERT INTO automation_health (source, last_ok_at, detail) VALUES ('cron', ?, ?) " +

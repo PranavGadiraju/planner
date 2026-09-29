@@ -39,7 +39,7 @@ export async function runScheduled(env: Env, _controller?: ScheduledController):
       db.prepare(dirtyFromAutoCloseSql('workouts')).bind(nowIso, nowIso, today),
       db.prepare(dirtyFromAutoCloseSql('sessions')).bind(nowIso, nowIso, today),
       db.prepare(PRUNE_TAP_LOG_SQL),
-      db.prepare(DIRTY_SQL).bind(today),
+      db.prepare(DIRTY_SQL).bind(today, addDays(today, -1), addDays(today, -2)),
     ])
     const autoClosed = { workouts: changes(workoutsR), sessions: changes(sessionsR) }
     const dirty = rows<{ local_day: string }>(dirtyR).map((r) => r.local_day)

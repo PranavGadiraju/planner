@@ -46,7 +46,7 @@ export function isPseudoApp(appId: string): boolean {
 
 /** An ISO-8601 timestamp normalised to what the Worker writes ('2026-09-28T13:00:00.000Z'), or null. */
 export function normIso(v: unknown): string | null {
-  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) return null
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/.test(v)) return null
   const t = new Date(v).getTime()
   return Number.isNaN(t) ? null : new Date(t).toISOString()
 }

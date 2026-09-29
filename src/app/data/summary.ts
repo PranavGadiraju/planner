@@ -5,37 +5,8 @@ import { addDays, weekStart } from '@shared/tz'
 import { apiGet, apiPost, type GetResult } from './api'
 
 /** One day_summary row as /api/summary returns it (mirrors DaySummary in src/worker/rollup.ts). */
-export interface DaySummary {
-  local_day: string
-  sleep_s: number
-  workout_s: number
-  study_s: number
-  routine_s: number
-  mac_s: number
-  phone_s: number
-  manual_s: number
-  unknown_s: number
-  tracked_s: number
-  mac_by_category: Record<string, number>
-  study_by_project: Record<string, number>
-  manual_by_category: Record<string, number>
-  kcal: number | null
-  protein_g: number | null
-  carb_g: number | null
-  fat_g: number | null
-  sets_count: number
-  volume: number
-  sessions_count: number
-  routine_done: number
-  routine_total: number
-  bed_late_min: number | null
-  final: number
-  computed_at: string | null
-  /** Today: computed on request, never stored. */
-  live?: boolean
-  /** A past day whose row is missing or still waiting for a rebuild (the view offers a refresh). */
-  stale?: boolean
-}
+import type { DaySummary } from '@shared/types'
+export type { DaySummary }
 export interface SummaryProject { id: string; name: string; color: string | null }
 export interface SummaryResponse { from: string; to: string; today: string; days: DaySummary[]; projects: SummaryProject[] }
 

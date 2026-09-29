@@ -37,7 +37,7 @@ export function Day() {
   const [view, setView] = useState<View>(readView)
   const change = (v: View) => { saveView(v); setView(v) }
   const switcher = <ViewSwitch view={view} onChange={change} />
-  if (view === 'week') return <WeekView date={date} today={todayStr} switcher={switcher} />
+  if (view === 'week') return <WeekView date={date} today={todayStr} switcher={switcher} onOpenDay={(d) => { change('day'); navigate(dayHash(d)) }} />
   if (view === 'month') return <MonthView date={date} today={todayStr} switcher={switcher} onOpenDay={(d) => { change('day'); navigate(dayHash(d)) }} />
   return <DayView date={date} todayStr={todayStr} switcher={switcher} />
 }

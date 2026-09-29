@@ -27,7 +27,9 @@
 .week-labels-tight { margin-top: 0; }
 .week-label { display: flex; flex-direction: column; align-items: center; gap: 0; min-height: 44px; padding: 4px 0; border-radius: 10px; color: var(--text-2); }
 .week-label:active { background: var(--surface-2); }
-.week-label:disabled { opacity: 0.45; }
+.week-label.is-future { opacity: 0.45; }
+.week-label-btn { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 0; width: 100%; min-height: 44px; cursor: pointer; }
+.week-label-btn:disabled { cursor: default; }
 .week-label.is-today .week-dom { background: var(--accent); color: var(--on-accent); }
 .week-dow { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); text-align: center; }
 .week-dow.is-today { color: var(--accent); }
@@ -106,3 +108,6 @@
   background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--cat-unknown) 45%, transparent) 0 3px, transparent 3px 6px); }
 .month-fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--accent); }
 .month-cell .stale-btn { position: absolute; top: -2px; right: -2px; width: 20px; height: 20px; }
+
+.month-cell-btn { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; width: 100%; height: 100%; cursor: pointer; }
+.month-cell-btn:disabled { cursor: default; }

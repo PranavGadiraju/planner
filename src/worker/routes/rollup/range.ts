@@ -56,8 +56,7 @@ export function planRange(days: readonly string[], rows: ReadonlyMap<string, Day
   pending.sort()
   plan.recompute = pending.slice(0, cap)
   for (const d of pending.slice(cap)) {
-    if (!rows.has(d) || dirty.has(d)) plan.stale.push(d)
-    else plan.asIs.push(d)
+    plan.stale.push(d) // beyond the cap every pending day is flagged, so the view can offer a refresh
   }
   return plan
 }

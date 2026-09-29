@@ -1,7 +1,7 @@
 // M6 screen time: POST /api/screentime (Mac script hourly, phone rows from the CLI) and GET /api/apps (category
 // triage list). Spread into ROUTES in ../index.ts. Validation and the SQL plan live in ./screentime/payload.ts.
 import type { Route, RouteContext } from '../env'
-import { json, readJson } from '../http'
+import { HttpError, json, readJson } from '../http'
 import type { AppCategoryRow } from '../../shared/types'
 import { MAX_SCREENTIME_BODY, parseScreentimeBody, planScreentime } from './screentime/payload'
 
@@ -12,7 +12,23 @@ export interface ScreentimeResponse { hours: number; intervals: number; apps_new
  * the window, bumps app_categories.seen_seconds, marks automation_health and dirty_days, all in ONE D1 batch
  * (transactional: a rejected or failed body never leaves a half-wiped window).
  */
+const MAC_ERROR_SQL =
+  "INSERT INTO automation_health (source, last_error_at, last_error) VALUES ('mac', ?, ?) " +
+  'ON CONFLICT(source) DO UPDATE SET last_error_at = excluded.last_error_at, last_error = excluded.last_error'
+
 export async function screentime(c: RouteContext): Promise<Response> {
+  try {
+    return await screentimeInner(c)
+  } catch (e) {
+    // A misconfigured script must show up on Today's health strip, not just as a growing "last push" age.
+    if (e instanceof HttpError && c.role === 'mac') {
+      await c.env.DB.prepare(MAC_ERROR_SQL).bind(c.now.toISOString(), e.message.slice(0, 200)).run().catch(() => undefined)
+    }
+    throw e
+  }
+}
+
+async function screentimeInner(c: RouteContext): Promise<Response> {
   const body = await readJson<unknown>(c.request, MAX_SCREENTIME_BODY)
   const payload = parseScreentimeBody(body, c.role ?? 'shortcut')
   const plan = planScreentime(payload, c.now, c.env.TZ)

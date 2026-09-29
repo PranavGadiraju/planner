@@ -154,3 +154,37 @@ export interface TodayPayload {
   running: { workout: Workout | null; session: (Session & { project_name: string }) | null }
   health: { rows: HealthRow[]; taps_today: number; mac_last_hour: ISO | null; phone_last_hour: ISO | null; apps_to_triage: number }
 }
+
+// ---- day_summary rows (rollups)
+export interface DaySummary {
+  local_day: string
+  sleep_s: number
+  workout_s: number
+  study_s: number
+  routine_s: number
+  mac_s: number
+  phone_s: number
+  manual_s: number
+  unknown_s: number
+  tracked_s: number
+  mac_by_category: Record<string, number>
+  study_by_project: Record<string, number>
+  manual_by_category: Record<string, number>
+  kcal: number | null
+  protein_g: number | null
+  carb_g: number | null
+  fat_g: number | null
+  sets_count: number
+  volume: number
+  sessions_count: number
+  routine_done: number
+  routine_total: number
+  bed_late_min: number | null
+  final: number
+  /** null only for the placeholder of a day that has no row yet (stale, never computed). */
+  computed_at: string | null
+  /** Today: computed on request, never stored. */
+  live?: true
+  /** A past day whose row is missing or still waiting for a rebuild (the view offers a refresh). */
+  stale?: true
+}

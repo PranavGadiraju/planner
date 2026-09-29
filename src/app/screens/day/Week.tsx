@@ -20,7 +20,7 @@ const STACK: SumCategory[] = ['sleep', 'routine', 'workout', 'study', 'mac', 'ph
 const WORSE_WHEN_UP = new Set<SumCategory>(['phone', 'unknown'])
 const DAY_S = 86400
 
-export function WeekView({ date, today, switcher }: { date: string; today: string; switcher: ComponentChildren }) {
+export function WeekView({ date, today, switcher, onOpenDay }: { date: string; today: string; switcher: ComponentChildren; onOpenDay: (day: string) => void }) {
   const week = weekOf(date)
   const prevWeek = weekOf(addDays(week.start, -7))
   const isCurrent = week.start === weekStart(today)
@@ -68,7 +68,7 @@ export function WeekView({ date, today, switcher }: { date: string; today: strin
         )}
         {s.data && (
           <>
-            <Columns days={week.days} rows={rows} today={today} onRefresh={s.reload} />
+            <Columns days={week.days} rows={rows} today={today} onRefresh={s.reload} onOpenDay={onOpenDay} />
             <TotalsCard cur={cur} complete={complete} cmpCur={cmpCur} d={d} soFar={sf ? sf.through + 1 : null} />
             <BedtimeCard days={week.days} rows={rows} grace={grace} stats={bed} today={today} />
             <RoutineCard per={routine.per_day} done={routine.done} total={routine.total} today={today} />
@@ -89,7 +89,7 @@ const VB_H = 170
 const PAD_T = 6
 const COL_GAP = 8
 
-function Columns({ days, rows, today, onRefresh }: { days: string[]; rows: Map<string, DaySummary>; today: string; onRefresh: () => Promise<void> }) {
+function Columns({ days, rows, today, onRefresh, onOpenDay }: { days: string[]; rows: Map<string, DaySummary>; today: string; onRefresh: () => Promise<void>; onOpenDay: (day: string) => void }) {
   const colW = VB_W / days.length
   const barW = colW - COL_GAP
   const h = VB_H - PAD_T
@@ -144,11 +144,13 @@ function Columns({ days, rows, today, onRefresh }: { days: string[]; rows: Map<s
         {days.map((day, i) => {
           const r = rows.get(day)
           return (
-            <button key={day} type="button" class={`week-label${day === today ? ' is-today' : ''}${day > today ? ' is-future' : ''}`} onClick={() => navigate(dayHash(day))} disabled={day > today}>
-              <span class="week-dow">{WEEKDAY_SHORT[i]}</span>
-              <span class="week-dom num">{Number(day.slice(8))}</span>
+            <div key={day} class={`week-label${day === today ? ' is-today' : ''}${day > today ? ' is-future' : ''}`}>
+              <button type="button" class="week-label-btn" onClick={() => onOpenDay(day)} disabled={day > today} aria-label={`Open ${day}`}>
+                <span class="week-dow">{WEEKDAY_SHORT[i]}</span>
+                <span class="week-dom num">{Number(day.slice(8))}</span>
+              </button>
               {r?.stale && <StaleRefresh day={day} onDone={onRefresh} />}
-            </button>
+            </div>
           )
         })}
       </div>

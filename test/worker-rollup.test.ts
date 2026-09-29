@@ -137,8 +137,8 @@ describe('/api/summary planning', () => {
     expect(plan.live).toBe(today)
     expect(plan.final).toEqual(['2026-09-20', '2026-09-25'])
     expect(plan.recompute).toEqual(['2026-09-21', '2026-09-22', '2026-09-23'])
-    expect(plan.stale).toEqual(['2026-09-24', '2026-09-26'])
-    expect(plan.asIs).toEqual(['2026-09-27'])
+    expect(plan.stale).toEqual(['2026-09-24', '2026-09-26', '2026-09-27']) // every pending day beyond the cap
+    expect(plan.asIs).toEqual([])
     // future days never appear anywhere
     const all = [plan.live, ...plan.final, ...plan.recompute, ...plan.stale, ...plan.asIs]
     expect(all).not.toContain('2026-09-29')
@@ -164,7 +164,7 @@ describe('cron', () => {
     const dirty = ['2026-09-27', '2026-09-01', '2026-09-28', '2026-09-10', '2026-09-05']
     expect(planRebuilds('2026-09-28', dirty)).toEqual(['2026-09-27', '2026-09-26', '2026-09-01', '2026-09-05', '2026-09-10'])
     const many = Array.from({ length: 30 }, (_, i) => `2026-08-${String(i + 1).padStart(2, '0')}`)
-    expect(planRebuilds('2026-09-28', many)).toHaveLength(12)
+    expect(planRebuilds('2026-09-28', many)).toHaveLength(2 + 5) // D-1, D-2 plus the dirty drain cap
     expect(planRebuilds('2026-09-28', [])).toEqual(['2026-09-27', '2026-09-26'])
   })
   it('auto-close statements only touch open rows and stamp ended_by auto', () => {

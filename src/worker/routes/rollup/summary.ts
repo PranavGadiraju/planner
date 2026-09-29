@@ -5,34 +5,8 @@ import { addDays, localDay } from '../../../shared/tz'
 import { rowLocalDay } from '../../db'
 
 /** One day_summary row as the API returns it (JSON columns parsed, numbers coerced). Mirrored in src/app/data/summary.ts. */
-export interface DaySummary {
-  local_day: string
-  sleep_s: number
-  workout_s: number
-  study_s: number
-  routine_s: number
-  mac_s: number
-  phone_s: number
-  manual_s: number
-  unknown_s: number
-  tracked_s: number
-  mac_by_category: Record<string, number>
-  study_by_project: Record<string, number>
-  manual_by_category: Record<string, number>
-  kcal: number | null
-  protein_g: number | null
-  carb_g: number | null
-  fat_g: number | null
-  sets_count: number
-  volume: number
-  sessions_count: number
-  routine_done: number
-  routine_total: number
-  bed_late_min: number | null
-  final: number
-  /** null only for the placeholder of a day that has no row yet (stale, never computed). */
-  computed_at: string | null
-}
+import type { DaySummary } from '../../../shared/types'
+export type { DaySummary }
 
 /** The raw D1 row (JSON maps are TEXT). */
 export interface DaySummaryRow extends Omit<DaySummary, 'mac_by_category' | 'study_by_project' | 'manual_by_category'> {

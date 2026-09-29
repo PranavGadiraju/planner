@@ -255,7 +255,7 @@ does the bootstrap/kickstart for you.
 
 What it reads: `/app/inFocus` (frontmost app) first; if that stream has fewer than 25 % of the rows `/app/usage`
 would give, it falls back to `/app/usage` and says so in the log. Only rows with `ZSOURCE.ZDEVICEID IS NULL`
-(this Mac). Window `[max(watermark - 3 h, now - 26 h), now)`. `com.apple.loginwindow`, screen-saver bundles and
+(this Mac). Window `[max(watermark - 3 h, now - 26 h), now)`, floored to the UTC hour. `com.apple.loginwindow`, screen-saver bundles and
 `com.apple.dock` are ignored. Intervals are unioned with a 120 s gap tolerance, unions under 60 s dropped, each
 tagged with its top app. New bundle ids are named with `mdfind` and cached. Roughly 35 rows an hour.
 
@@ -342,7 +342,7 @@ Exit codes: 0 ok, 1 error (cannot reach the Worker, 401/403, server error), 2 us
 | `GET /api/settings` | app | parsed settings (write them through `/api/write`, table `settings`) |
 
 Everything else in `docs/plan.md` (food, lifting, sessions, lookups, screentime, summaries, export, cron rollups)
-arrives in milestones 3-8 and returns 404 until then. The cron trigger currently only prunes `tap_log` to 500
+arrives in milestones 3-5 and returns 404 until then. Rollups, export and the nightly cron are described in section 10.
 rows.
 
 ---

@@ -63,7 +63,8 @@ export function splitApps(rows: readonly AppCategoryRow[]): { triage: AppCategor
 
 /** The row the app writes: category + label only, so a stale seen_seconds never overwrites the server's counter. */
 export function categoryRow(row: AppCategoryRow, category: AppCategory, at: Date = new Date()): Record<string, unknown> {
-  return { app_id: row.app_id, label: row.label, category, updated_at: at.toISOString(), deleted_at: null }
+  // Only the category travels: a cached row's stale label must never overwrite one the Mac push has since filled in.
+  return { app_id: row.app_id, category, updated_at: at.toISOString(), deleted_at: null }
 }
 
 /** Queue the category write and keep the Today payload's triage count in step (optimistic). */

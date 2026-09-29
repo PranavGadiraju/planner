@@ -130,7 +130,7 @@ def compute_window(now: float, since: Optional[str]) -> Tuple[float, float]:
         start = parse_iso(since)
         if now - start > SINCE_CAP_S:
             log("--since is more than 48 h ago; capping the window at 48 h to protect the D1 write budget")
-            start = now - SINCE_CAP_S
+            return align_hour(now - SINCE_CAP_S) + 3600.0, now  # ceil to the next hour: the Worker rejects > 48 h
         return align_hour(start), now
     wm = read_watermark()
     floor = now - LOOKBACK_MAX_S

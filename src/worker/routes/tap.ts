@@ -11,6 +11,7 @@ import type { BedTapResult } from '../../shared/sleep'
 import type { RoutineItem, RoutineLog, Sleep, Source, TapAction, TapResponse } from '../../shared/types'
 
 const SLEEP_HISTORY_SQL = 'SELECT * FROM sleep WHERE deleted_at IS NULL ORDER BY night_of DESC LIMIT 60'
+const TAP_DIRTY_SQL = 'INSERT INTO dirty_days (local_day, marked_at) VALUES (?, ?) ON CONFLICT(local_day) DO UPDATE SET marked_at = excluded.marked_at'
 const TAP_LOG_SQL = 'INSERT INTO tap_log (ts, item, role, result) VALUES (?, ?, ?, ?)'
 const NFC_OK_SQL = "INSERT INTO automation_health (source, last_ok_at) VALUES ('nfc', ?) ON CONFLICT(source) DO UPDATE SET last_ok_at = excluded.last_ok_at"
 const NFC_REACHED_WITH_ERROR_SQL =
@@ -149,6 +150,9 @@ export async function tap(c: RouteContext): Promise<Response> {
 
   // Every call is logged at its arrival time, including duplicates and rejects; the shortcut role also proves the
   // automation is alive (an unknown item still reached the server, so last_ok_at moves too).
+  // A back-dated app tap (ts on an earlier day) must reach that day's summary before the nightly rebuild.
+  const arrivalDay = localDay(c.now, tz)
+  for (const d of new Set([today, night])) if (d < arrivalDay) writes.push(db.prepare(TAP_DIRTY_SQL).bind(d, arrivedIso))
   writes.push(db.prepare(TAP_LOG_SQL).bind(arrivedIso, itemOut, role, action))
   if (role === 'shortcut') {
     writes.push(status === 200 ? db.prepare(NFC_OK_SQL).bind(arrivedIso) : db.prepare(NFC_REACHED_WITH_ERROR_SQL).bind(arrivedIso, arrivedIso, message))
