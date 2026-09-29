@@ -63,8 +63,9 @@ export function pick(rows: ReadonlyMap<string, DaySummary>, days: readonly strin
 }
 
 /** A day counts as "with data" when something was tracked (a missing or never-computed day has tracked_s = 0). */
+/** A day counts as "with data" when something in it is known: a stored row that is 100 % Unknown is no data. */
 export function hasData(d: DaySummary | undefined): boolean {
-  return !!d && d.tracked_s > 0
+  return !!d && d.tracked_s > 0 && d.unknown_s < d.tracked_s
 }
 
 // ---- sums -----------------------------------------------------------------------------------------------
