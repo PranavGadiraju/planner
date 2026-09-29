@@ -59,8 +59,6 @@ Global: --json prints the raw API response. --help / -h prints this.
 Token: PLANNER_TOKEN env or Keychain item "${KEYCHAIN_SERVICE}" (security add-generic-password -U -a "$USER" -s ${KEYCHAIN_SERVICE} -w).
 `
 
-const LATER = {}
-
 // ---------------------------------------------------------------- args
 
 // Flags that never take a value, so `planner day --json yesterday` keeps "yesterday" as a positional.
@@ -136,6 +134,8 @@ function describeFetchError(e) {
   return (e && e.message) || String(e)
 }
 
+// The token only ever lands in the authorization header here. Errors below quote the URL, method, path and the
+// response text; never the headers, and never a request body (none carries a token today; keep it that way).
 async function api(method, path, { auth = true, body } = {}) {
   const url = (await baseUrl()) + path
   const headers = { accept: 'application/json' }
@@ -422,7 +422,7 @@ async function cmdDay(positional, flags) {
   if (!gaps.length) out.push('  none')
   else {
     out.push(table(gaps.map((g) => [`  ${span(g.start, g.end)}`, hms(g.minutes * 60)])))
-    out.push('  fill one by tapping it in the Day tab (planner block add arrives with milestone 3)')
+    out.push('  fill it by tapping the gap in the Day tab or with planner block add')
   }
 
   if (Array.isArray(d.markers) && d.markers.length) {
@@ -683,13 +683,6 @@ async function main() {
   const { positional, flags } = parseArgs(process.argv.slice(2))
   const cmd = positional[0]
   if (!cmd || flags.help || cmd === 'help') { process.stdout.write(USAGE); return }
-  const two = positional.slice(0, 2).join(' ')
-  const later = LATER[two] ?? LATER[cmd]
-  if (later !== undefined) {
-    console.error(`planner ${LATER[two] !== undefined ? two : cmd}: not available until milestone ${later}`)
-    process.exitCode = 2
-    return
-  }
   switch (cmd) {
     case 'config': return cmdConfig(flags)
     case 'me': return cmdMe(flags)

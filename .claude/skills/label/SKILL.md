@@ -5,9 +5,9 @@ description: Turn a nutrition-label photo (or typed label numbers) into a per-10
 
 # /label - add a food from a nutrition label
 
-Availability: `planner food add` arrives in **milestone 3** (Food). Until then `bin/planner food add` exits 2 with
-"not available until milestone 3"; you can still read the label, build the table and show it, but say clearly that
-posting is not possible yet.
+Availability: `planner food add` and `planner eat` are live (`planner food add --help` prints the flags). Exit
+code 1 means the Worker could not be reached or the token was rejected: report the error as printed and stop;
+never retry with another token or edit where tokens live.
 
 ## Steps
 
@@ -36,7 +36,7 @@ posting is not possible yet.
 
    plus the name, brand, serving text, and the 4/4/9 line ("implied 211 kcal vs 210 on label - ok" or "FLAG: ...").
    **Ask "Post this?" and post only after an explicit yes.**
-6. **Post** (milestone 3+): one call to
+6. **Post**: one call to
 
    ```sh
    planner food add --json '{"name":"...","brand":"...","serving_g":55,"serving_text":"2/3 cup (55 g)","per_serving":{"kcal":210,"protein_g":6,"carb_g":40,"fat_g":3,"fiber_g":4,"sugar_g":12},"label_json":{...raw numbers as read...}}'
@@ -44,7 +44,7 @@ posting is not possible yet.
 
    The Worker converts to per-100 g, stores `source='claude'` (badged "from Claude" in the app) and returns the
    stored row plus any 4/4/9 warning. Print the returned id and the per-100 g values.
-7. Offer `planner eat --food <id> --grams <n>` (also milestone 3) to log it now.
+7. Offer `planner eat --food <id> --grams <n>` to log it now.
 
 ## Rules
 

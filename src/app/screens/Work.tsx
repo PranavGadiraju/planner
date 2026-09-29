@@ -169,6 +169,7 @@ function TodayCard({ sessions, onEdit }: { sessions: SessionRow[]; onEdit: (s: S
                     <i class="pdot" style={`--c:${projectColor(sessionProject(s))}`} />
                     <span class="pname">{s.project_name}</span>
                     {s.source === 'cli' && <span class="badge" title="Logged from Claude Code">cli</span>}
+                    {s.source === 'suggest' && <span class="badge" title="Logged from a Mac screen-time suggestion">suggested</span>}
                     <span class="dur">{secondsLabel(secs)}</span>
                   </span>
                   <span class={`sess-note${s.note ? '' : ' empty'}`}>{s.note ?? (live ? 'running…' : 'no note')}</span>

@@ -5,6 +5,7 @@ import {
   labelPer100, mergeRows, recomputeEntry, searchLocal, slotAt, topMeals, EMPTY_LABEL_FORM,
 } from '../src/app/data/food'
 import { expandUpcE, resolveGtin, scannedGtin } from '../src/app/screens/food/gtin'
+import { showSourceInRow, sourceLabel } from '../src/app/screens/food/common'
 import { parseHash } from '../src/app/router'
 
 const TZ = 'America/New_York'
@@ -196,6 +197,19 @@ describe('label form', () => {
     const r = labelPer100({ ...EMPTY_LABEL_FORM, mode: 'per100', kcal: '130', protein: '2.7', carb: '28', fat: '0.3' })!
     expect(r.per100).toEqual({ kcal_100: 130, protein_100: 2.7, carb_100: 28, fat_100: 0.3, fiber_100: null, sugar_100: null })
     expect(r.serving_g).toBeNull()
+  })
+})
+
+describe('source badge', () => {
+  it('names every source and flags only the non-label ones in dense list rows', () => {
+    expect(sourceLabel('claude')).toBe('from Claude')
+    expect(sourceLabel('usda')).toBe('USDA')
+    expect(sourceLabel('off')).toBe('Open Food Facts')
+    expect(sourceLabel('label')).toBe('label')
+    expect(showSourceInRow('claude')).toBe(true)
+    expect(showSourceInRow('usda')).toBe(true)
+    expect(showSourceInRow('off')).toBe(true)
+    expect(showSourceInRow('label')).toBe(false)
   })
 })
 

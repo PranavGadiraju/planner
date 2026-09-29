@@ -113,6 +113,7 @@ export function LogFoodSheet({ food, at, zone, onDone, onClose, initialGrams }: 
   return (
     <Sheet title={food.name} sub={`${food.brand ? `${food.brand} · ` : ''}${fmtKcal(food.kcal_100)} kcal / 100 g${food.serving_text ? ` · ${food.serving_text}` : ''}`} onClose={onClose}>
       <div class="stack">
+        <div class="sheet-source"><SourceBadge source={food.source} /></div>
         <GramsPad food={food} grams={grams} onChange={setGrams} />
         <SlotChips value={slot} onChange={setSlot} />
         <button type="button" class="btn btn-primary btn-big btn-block" onClick={() => void save()} disabled={busy}>
@@ -169,10 +170,19 @@ export function PortionSheet({ meal, at, zone, onDone, onClose }: { meal: Meal; 
   )
 }
 
+/** Badge text for a food's source: where its numbers came from. */
+export function sourceLabel(source: Food['source']): string {
+  return source === 'off' ? 'Open Food Facts' : source === 'usda' ? 'USDA' : source === 'claude' ? 'from Claude' : 'label'
+}
+
+/** True for sources worth flagging in a dense list row (anything but a label typed by hand). */
+export function showSourceInRow(source: Food['source']): boolean {
+  return source !== 'label'
+}
+
 /** "OFF" / "USDA" / "label" / "Claude" source badge. */
 export function SourceBadge({ source }: { source: Food['source'] }) {
-  const label = source === 'off' ? 'Open Food Facts' : source === 'usda' ? 'USDA' : source === 'claude' ? 'from Claude' : 'label'
-  return <span class={`badge${source === 'claude' ? ' badge-sleep' : ''}`}>{label}</span>
+  return <span class={`badge${source === 'claude' ? ' badge-sleep' : ''}`} title={source === 'claude' ? 'Added by Claude Code from a label photo' : undefined}>{sourceLabel(source)}</span>
 }
 
 export function MacroLine({ p }: { p: Per100 }) {

@@ -113,7 +113,7 @@ function SelectedSession({ s, unit }: { s: HistorySession; unit: string }) {
     <div style={{ marginTop: '10px' }}>
       <div class="row small muted" style={{ justifyContent: 'space-between' }}>
         <span><b style={{ color: 'var(--text)' }}>{dayLabel(s.local_day)}</b>{s.name ? ` · ${s.name}` : ''}{s.is_pr && <span class="badge badge-pr" style={{ marginLeft: '6px' }}>PR</span>}</span>
-        <a href={`#/lift/s/${s.workout_id}`} class="row" style={{ gap: '2px' }}>Open <Icon name="chevron" size={14} /></a>
+        <a href={`#/lift/s/${s.workout_id}`} class="link-row" style={{ gap: '2px' }}>Open <Icon name="chevron" size={14} /></a>
       </div>
       <div class="sel-sets">
         {s.sets.map((x) => (

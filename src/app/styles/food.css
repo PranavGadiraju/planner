@@ -2,6 +2,12 @@
 
 .food-content { gap: 12px; }
 
+/* Inline text links in card heads ("New meal") get a 44 px hit area without changing the head's height.
+   Shared rule: the same .link-row lives in styles.css and lift.css; duplicates are harmless. */
+.link-row { display: inline-flex; align-items: center; min-height: 44px; margin: -12px 0; padding: 0 4px; }
+/* Source badge under a logging sheet's subtitle (label / USDA / Open Food Facts / from Claude). */
+.sheet-source { display: flex; align-items: center; gap: 8px; margin-top: -4px; }
+
 /* ---- header card ------------------------------------------------------------------------------- */
 .food-head { display: flex; flex-direction: column; gap: 8px; padding-top: 6px; }
 .food-daynav { display: flex; align-items: center; justify-content: space-between; margin: 0 -8px; }
