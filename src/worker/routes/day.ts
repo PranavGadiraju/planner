@@ -14,6 +14,8 @@ export interface DayProject { id: string; name: string; color: string | null }
 export interface DayPayload extends DayResult {
   routine_items: RoutineItem[]
   projects: DayProject[]
+  /** Live manual rows overlapping the window, so the app can edit or delete a block. */
+  time_blocks: TimeBlock[]
 }
 
 function rows<T>(r: D1Result<unknown> | undefined): T[] {
@@ -74,6 +76,7 @@ export async function day(c: RouteContext): Promise<Response> {
     ...buildDay(input),
     routine_items: items.filter((i) => Number(i.active) === 1),
     projects: rows<DayProject>(projectsR),
+    time_blocks: input.time_blocks,
   }
   return json(payload)
 }

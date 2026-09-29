@@ -400,14 +400,14 @@ async function cmdDay(positional, flags) {
   // timeline
   out.push('', `Timeline (${d.blocks.length} block${d.blocks.length === 1 ? '' : 's'})`)
   if (!d.blocks.length) out.push('  nothing yet')
-  else out.push(table(d.blocks.map((b) => [`  ${span(b.start, b.end)}`, b.category, `${b.label} (${b.source})`, hm(b.minutes)])))
+  else out.push(table(d.blocks.map((b) => [`  ${span(b.start, b.end)}`, b.category, `${b.label} (${b.source})`, hms(b.minutes * 60)])))
 
   // gaps: unknown runs of 5 min or more (shorter ones are absorbed into the previous block for display)
   const gapMin = gaps.reduce((a, g) => a + (Number(g.minutes) || 0), 0)
-  out.push('', `Gaps (${gaps.length}${gaps.length ? `, ${hm(gapMin)} in runs of 5 min or more` : ''})`)
+  out.push('', `Gaps (${gaps.length}${gaps.length ? `, ${hms(gapMin * 60)} in runs of 5 min or more (plus any unknown run at the start of the day)` : ''})`)
   if (!gaps.length) out.push('  none')
   else {
-    out.push(table(gaps.map((g) => [`  ${span(g.start, g.end)}`, hm(g.minutes)])))
+    out.push(table(gaps.map((g) => [`  ${span(g.start, g.end)}`, hms(g.minutes * 60)])))
     out.push('  fill one by tapping it in the Day tab (planner block add arrives with milestone 3)')
   }
 

@@ -51,8 +51,8 @@ export function ShortcutSetup() {
             <li>Shortcuts → <strong>+</strong> → name it <code>Planner Tap</code>.</li>
             <li>Add <strong>Get Contents of URL</strong>: URL <code>{url}</code>, Method <code>POST</code>. Under Headers add <code>Authorization</code> = <code>Bearer &lt;SHORTCUT_TOKEN&gt;</code>. Request Body <code>JSON</code>, one field: key <code>item</code>, value <strong>Shortcut Input</strong>.</li>
             <li>Add <strong>Get Dictionary Value</strong>: get value for key <code>ok</code> in <em>Contents of URL</em>.</li>
-            <li>Add <strong>If</strong>: <em>Dictionary Value</em> <code>is not</code> <code>1</code> → inside, <strong>Show Notification</strong> <code>Planner failed: [Shortcut Input]</code>. (Get Contents of URL does not fail on a 4xx body, so this notification is the only way a broken token or typo shows up.)</li>
-            <li>Optional, in the <em>Otherwise</em> branch: <strong>Get Dictionary Value</strong> for key <code>message</code> → <strong>Show Notification</strong> with it, e.g. "Run done · 41 min".</li>
+            <li>Add <strong>If</strong>: <em>Dictionary Value</em> <code>is</code> <code>true</code> → inside (optional): <strong>Get Dictionary Value</strong> for key <code>message</code> → <strong>Show Notification</strong> with it, e.g. "Run done · 41 min".</li>
+            <li>In the <em>Otherwise</em> branch: <strong>Show Notification</strong> <code>Planner failed: [Shortcut Input]</code>. (Get Contents of URL does not fail on a 4xx body, and a missing value never satisfies "is true", so a bad token, a typo or a non-JSON reply always lands here.)</li>
             <li>Run it once by hand with input <code>shower</code> and choose <strong>Always Allow</strong> for the network request. Then check the tap log here.</li>
           </ol>
         </section>

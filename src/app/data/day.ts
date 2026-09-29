@@ -2,11 +2,11 @@
 // Watched dates re-fetch on visibilitychange, after an outbox flush that touched them, and (today) every 60 s while
 // visible. Manual time_blocks are patched in optimistically on enqueue and replaced by the server's answer after
 // the flush.
-import { signal, type Signal } from '@preact/signals'
+import { effect, signal, type Signal } from '@preact/signals'
 import type { DayResult } from '@shared/day'
 import type { Project, RoutineItem, TimeBlock } from '@shared/types'
 import { localDay } from '@shared/tz'
-import { ApiError, apiGet, hasToken, readCache } from './api'
+import { ApiError, apiGet, hasToken, readCache, token } from './api'
 import * as outbox from './outbox'
 import { localToday, tz } from './store'
 import { clearRange, daysTouched, insertBlock } from './daymath'
@@ -118,6 +118,14 @@ outbox.onFlushed((items) => {
     else for (const x of d) touched.add(x)
   }
   for (const date of watchers.keys()) if (all || touched.has(date)) void loadDay(date)
+})
+
+// A token that arrives after boot (pasted in Settings, restored from IndexedDB) re-fetches every watched day.
+let seenToken: string | null = null
+effect(() => {
+  const t = token.value
+  if (t && t !== seenToken) for (const date of watchers.keys()) void loadDay(date)
+  seenToken = t
 })
 
 let wired = false

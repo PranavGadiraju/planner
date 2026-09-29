@@ -61,7 +61,6 @@ export async function tap(c: RouteContext): Promise<Response> {
   const { item, at: now } = parsed
   const key = item.toLowerCase()
   const tz = env.TZ
-  const nowIso = now.toISOString()
   const today = localDay(now, tz)
   const night = nightOf(now, tz)
   const source: Source = role === 'shortcut' ? 'nfc' : 'app'

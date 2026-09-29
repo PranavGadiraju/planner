@@ -40,7 +40,7 @@ const MAC_TINT: Record<string, string> = {
 
 /** CSS colour for a block: the --cat-* token, with Mac blocks tinted by their app category. */
 export function blockColor(category: ChartCategory | 'other', sub: string | null): string {
-  if (category === 'mac') return MAC_TINT[sub ?? 'other'] ?? MAC_TINT.other ?? 'var(--cat-mac)'
+  if (category === 'mac') return sub ? (MAC_TINT[sub] ?? MAC_TINT.other ?? 'var(--cat-mac)') : 'var(--cat-mac)'
   return `var(--cat-${category})`
 }
 

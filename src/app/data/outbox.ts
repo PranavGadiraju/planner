@@ -111,9 +111,13 @@ function scheduleRetry(): void {
 }
 
 /** Sends queued rows in batches of up to 200. Only one flush runs at a time; callers can await it. */
+let rerun = false
 export function flush(): Promise<void> {
-  if (inFlight) return inFlight
-  inFlight = run().finally(() => { inFlight = null })
+  if (inFlight) { rerun = true; return inFlight } // a flush requested mid-run re-runs once the current one settles
+  inFlight = run().finally(() => {
+    inFlight = null
+    if (rerun) { rerun = false; void flush() }
+  })
   return inFlight
 }
 

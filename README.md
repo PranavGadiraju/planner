@@ -336,7 +336,7 @@ Exit codes: 0 ok, 1 error (cannot reach the Worker, 401/403, server error), 2 us
 | `POST /api/tap` `{item, ts?}` | shortcut, app | routine start/finish, `bed`, `wake`, `winddown` (tap log only); server-timestamped for the shortcut role; every call logged to `tap_log`, an unknown item is a 400 with `action: unknown_item` |
 | `POST /api/write` `{mutations:[{table, rows}]}` | app | batched idempotent upserts (max 200 rows) guarded by `updated_at`; past days marked dirty |
 | `GET /api/today` | app | routine items + today's log, sleep (tonight, last night, open, streak), check-in, running timers, health |
-| `GET /api/day/:date` | app | (M2) one local day from `buildDay`: `blocks[]`, `gaps[]`, `totals`, `mac_by_category`, `study_by_project`, `manual_by_category`, `markers[]`, `sleep_inferred`, `now_min`, `is_today` |
+| `GET /api/day/:date` | app | (M2) one local day from `buildDay`: `blocks[]`, `gaps[]`, `totals`, `mac_by_category`, `study_by_project`, `manual_by_category`, `markers[]`, `sleep_inferred`, `now_min`, `is_today`, plus `routine_items[]` (active), `projects[]` and the live `time_blocks[]` for the Fill sheet; `:date` is `YYYY-MM-DD` or `today` |
 | `GET /api/tap/log` | app | last 100 taps |
 | `GET /api/health/automations` | app | automation_health rows |
 | `GET /api/settings` | app | parsed settings (write them through `/api/write`, table `settings`) |
@@ -374,7 +374,7 @@ totals); runs of 5 minutes or more are the **gaps**, drawn hatched and tappable.
 commute, rest, other, or sleep / workout / study with a project), adjust the start and end, add a label, save.
 That writes a `time_blocks` row through the outbox (`POST /api/write`), so it works offline and syncs later, and
 the ring and totals update immediately. Because manual blocks are painted first, a block you draw over something
-automatic overrides it; tap any block to see its source and times and to edit or delete it (deletes are
+automatic overrides it; tap any block to see its source and times; blocks you drew by hand can be edited or deleted from that sheet (deletes are
 tombstones, so a wrong fill is one tap to undo). From milestone 3 `planner block add --from --to --category`
 does the same from the CLI.
 

@@ -84,7 +84,7 @@ read -r NOW BACKDATED BACK_MIN < <(TZ_NAME="$TZ_NAME" node -e '
   const sinceMidnightMs = ((g("hour") % 24) * 3600 + g("minute") * 60 + g("second")) * 1000 + now.getMilliseconds()
   const midnight = now.getTime() - sinceMidnightMs
   const back = new Date(Math.min(now.getTime(), Math.max(now.getTime() - 600000, midnight + 60000)))
-  console.log(now.toISOString(), back.toISOString(), Math.round((now.getTime() - back.getTime()) / 60000))
+  console.log(now.toISOString(), back.toISOString(), Math.floor((now.getTime() - back.getTime()) / 60000))
 ')
 echo "== now $NOW (tz $TZ_NAME), back-dated tap at $BACKDATED ($BACK_MIN min ago)"
 

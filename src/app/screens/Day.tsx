@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Block, Gap } from '@shared/day'
 import { CATEGORY_LABELS } from '@shared/day'
 import type { BlockCategory, TimeBlock } from '@shared/types'
-import { addDays, localHHMM, zonedToUTC } from '@shared/tz'
+import { addDays, localDay, localHHMM, zonedToUTC } from '@shared/tz'
 import { Sheet } from '../components/Sheet'
 import { Icon } from '../components/Icon'
 import { SyncDot } from '../components/TopBar'
@@ -164,10 +164,10 @@ function Timeline({ data, isToday, onBlock, onGap }: { data: DayPayload; isToday
 
   return (
     <div class="timeline" ref={ref} style={`height:${N}px`}>
-      {Array.from({ length: Math.ceil(N / 60) }, (_, h) => (
-        <div key={h} class="tl-hour" style={`top:${h * 60}px`}>
+      {hourMarks(data).map(({ h, top }) => (
+        <div key={h} class="tl-hour" style={`top:${top}px`}>
           {/* the now label takes the gutter when it sits on an hour line */}
-          {(nowMin === null || Math.abs(h * 60 - nowMin) > 12) && <span class="tl-hour-label num">{String(h % 24).padStart(2, '0')}</span>}
+          {(nowMin === null || Math.abs(top - nowMin) > 12) && <span class="tl-hour-label num">{String(h).padStart(2, '0')}</span>}
         </div>
       ))}
       {nowMin !== null && nowMin < N && <div class="tl-future" style={`top:${nowMin}px;height:${N - nowMin}px`} />}
@@ -235,8 +235,23 @@ const SOURCE_LABELS: Record<string, string> = {
 
 /** The manual row behind a block (a block can be a clipped piece of its row). */
 function rowFor(data: DayPayload, b: Block): TimeBlock | null {
-  const rows = (data.time_blocks ?? []).filter((r) => !r.deleted_at && r.start_ts <= b.start && r.end_ts >= b.end)
+  // buildDay floors/ceils block edges to whole minutes, so compare instants with a one-minute tolerance.
+  const bs = new Date(b.start).getTime(), be = new Date(b.end).getTime(), tol = 60_000
+  const rows = (data.time_blocks ?? []).filter((r) => !r.deleted_at && new Date(r.start_ts).getTime() <= bs + tol && new Date(r.end_ts).getTime() >= be - tol)
   return rows.sort((x, y) => (x.start_ts < y.start_ts ? 1 : -1))[0] ?? null
+}
+
+/** Hour gridlines placed by wall clock, so DST days (1380 / 1500 minutes) keep labels next to the right minutes. */
+function hourMarks(data: DayPayload): { h: number; top: number }[] {
+  const out: { h: number; top: number }[] = []
+  const seen = new Set<number>()
+  for (let h = 0; h < 24; h++) {
+    const top = minuteOf(zonedToUTC(data.day, `${String(h).padStart(2, '0')}:00`, data.tz).toISOString(), data.start)
+    if (top < 0 || top >= data.minutes || seen.has(top)) continue
+    seen.add(top)
+    out.push({ h, top })
+  }
+  return out
 }
 
 function BlockSheet({ block, data, onClose, onEdit, onDelete }: {
@@ -298,8 +313,9 @@ function FillSheet({ target, data, onClose }: { target: FillTarget; data: DayPay
   }
   const save = async () => {
     if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) { toast('Set both times', { kind: 'danger' }); return }
-    const s = zonedToUTC(data.day, start, tz)
-    let e = zonedToUTC(data.day, end, tz)
+    const baseDay = localDay(target.start, tz) // a block that began yesterday (23:30-00:30) keeps its own day
+    const s = zonedToUTC(baseDay, start, tz)
+    let e = zonedToUTC(baseDay, end, tz)
     if (e.getTime() <= s.getTime()) e = new Date(e.getTime() + 86400_000) // past midnight
     const ts = new Date().toISOString()
     const row: TimeBlock = {
