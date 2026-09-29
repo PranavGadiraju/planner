@@ -1,0 +1,33 @@
+{
+  "name": "planner",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:worker": "wrangler dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "deploy": "vite build && wrangler deploy",
+    "db:local": "wrangler d1 execute planner --local --file=schema.sql",
+    "db:remote": "wrangler d1 execute planner --remote --file=schema.sql",
+    "planner": "node bin/planner"
+  },
+  "dependencies": {
+    "@preact/signals": "^2.11.2",
+    "idb-keyval": "^6.3.0",
+    "preact": "^10.29.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260929.1",
+    "@preact/preset-vite": "^2.10.6",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6",
+    "vite-plugin-pwa": "^1.3.0",
+    "vitest": "^3.2.7",
+    "wrangler": "^4.143.0"
+  }
+}
