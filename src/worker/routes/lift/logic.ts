@@ -14,7 +14,14 @@ export interface SetWithPrior extends SetRow { prior_best: number | null }
 export interface WorkoutDetail { workout: Workout; sets: SetWithPrior[]; exercises: Exercise[] }
 export interface TemplatePayload { workout: Workout | null; sets: SetRow[]; exercises: Exercise[] }
 export interface LastSet extends SetRow { local_day: string; workout_name: string | null }
-export interface LastSetsPayload { sets: LastSet[]; best_e1rm: number | null }
+/** The best e1RM logged in one workout. */
+export interface WorkoutBest { workout_id: string; best: number }
+/**
+ * best_e1rm is the best ever; bests holds the top two workouts by best so the app can take "the best outside the
+ * running workout" from one payload (bests[0], or bests[1] when bests[0] is that workout) and keep a single, complete
+ * cache entry per exercise for the gym.
+ */
+export interface LastSetsPayload { sets: LastSet[]; best_e1rm: number | null; bests: WorkoutBest[] }
 
 /** One row of the history query: a set joined to its workout, ordered by (started_at, ts, set_no). */
 export interface HistoryRow {

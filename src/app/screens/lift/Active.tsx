@@ -11,9 +11,9 @@ import { navigate } from '../../router'
 import { dayLabel, hhmm } from '../../data/format'
 import { settings, tz } from '../../data/store'
 import {
-  AUTO_CLOSE_MS, active, addExerciseToWorkout, autoCloseEnd, deleteSet, deleteWorkout, editSet, exercises, finishWorkout, fmtWeight, lastSessionSets,
-  lastSets, loadExercises, loadTemplate, loadWorkouts, logSet, nextSetNo, openWorkout, prefillSet, priorBestFor, removeExerciseFromWorkout, renameWorkout,
-  type ActiveState, type OpenResult, type TemplatePayload,
+  AUTO_CLOSE_MS, active, addExerciseToWorkout, autoCloseEnd, deleteSet, deleteWorkout, dismissRejection, editSet, exercises, finishWorkout, fmtWeight,
+  lastSessionSets, lastSets, loadExercises, loadTemplate, loadWorkouts, logSet, nextSetNo, openWorkout, prefillSet, priorBestFor, rejections,
+  removeExerciseFromWorkout, renameWorkout, type ActiveState, type OpenResult, type TemplatePayload,
 } from '../../data/lift'
 import { ExercisePicker } from './ExercisePicker'
 import { NumPad } from './NumPad'
@@ -177,6 +177,12 @@ function Session({ a, template }: { a: ActiveState; template: TemplatePayload | 
     <>
       <Bar title={w.name ?? 'Workout'} elapsed={elapsed} onFinish={onFinishTap} onRename={() => setRenaming(true)} />
       <main class="content fade wk-content">
+        {rejections.value.map((r) => (
+          <div key={r.id} class="banner banner-danger" role="alert">
+            <span class="grow small"><strong>{r.label}</strong> <span class="faint">{r.reason}</span></span>
+            <button type="button" class="btn btn-sm" onClick={() => dismissRejection(r.id)}>OK</button>
+          </div>
+        ))}
         {overdue && (
           <div class="banner">
             <span class="grow small"><strong>Open for over 3 h.</strong> Forgotten? Close it 2 min after the last set{a.sets.length ? ` (${hhmm(autoCloseEnd(w, a.sets), tz.value)})` : ''}; the nightly job would auto-close it anyway.</span>
@@ -260,7 +266,7 @@ function ExercisePage({ a, exerciseId, template, unit }: { a: ActiveState; exerc
   // Re-arm for set N from the pre-fill rule, unless the user already adjusted the steppers for this set.
   useEffect(() => {
     if (touched.current === setNo) return
-    const p = prefillSet(setNo, { templateSets, currentSets: mySets, lastEver: last?.sets ?? [] })
+    const p = prefillSet(setNo, { templateSets, currentSets: mySets, lastEver: last?.sets.filter((s) => s.workout_id !== a.workout.id) ?? [] })
     setReps(p.reps)
     setWeight(p.weight)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -292,7 +298,7 @@ function ExercisePage({ a, exerciseId, template, unit }: { a: ActiveState; exerc
           {ex?.muscle && <div class="ex-muscle">{ex.muscle}</div>}
           <div class="ghost num">
             <div>{ghost ? <>Last ({dayLabel(ghost.day).slice(4)}): <b>{ghost.sets.map((s) => `${fmtWeight(s.weight)}×${s.reps}`).join(', ')}</b></> : 'First time logging this one.'}</div>
-            {best !== null && <div class="pr">Best e1RM {Math.round(best)} {unit}</div>}
+            {typeof best === 'number' && <div class="pr">Best e1RM {Math.round(best)} {unit}</div>}
           </div>
         </div>
         {mySets.length === 0 && (

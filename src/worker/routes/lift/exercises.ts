@@ -34,7 +34,8 @@ export async function exerciseHistory(c: RouteContext): Promise<Response> {
   const since = rangeStart(range, now)
   const db = env.DB
   const [exR, rowsR, bestR] = await db.batch([
-    db.prepare('SELECT * FROM exercises WHERE id = ? LIMIT 1').bind(id),
+    // Tombstoned (merged) exercises 404 like every other lift query hides them; a stale link must not offer Edit / Merge.
+    db.prepare('SELECT * FROM exercises WHERE id = ? AND deleted_at IS NULL LIMIT 1').bind(id),
     db.prepare(HISTORY_SQL).bind(id, since, since),
     // The best before the range, so the first session inside it is only a PR when it really beat history.
     db.prepare(PRIOR_BEST_SQL).bind(id, since, since),

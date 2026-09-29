@@ -20,7 +20,9 @@ export interface SetWithPrior extends SetRow { prior_best: number | null }
 export interface WorkoutDetail { workout: Workout; sets: SetWithPrior[]; exercises: Exercise[] }
 export interface TemplatePayload { workout: Workout | null; sets: SetRow[]; exercises: Exercise[] }
 export interface LastSet extends SetRow { local_day: string; workout_name: string | null }
-export interface LastSetsPayload { sets: LastSet[]; best_e1rm: number | null }
+export interface WorkoutBest { workout_id: string; best: number }
+/** Fetched without excluding the running workout (one complete cache entry per exercise); bests = top two workouts. */
+export interface LastSetsPayload { sets: LastSet[]; best_e1rm: number | null; bests: WorkoutBest[] }
 export interface HistorySet { id: string; set_no: number; reps: number; weight: number; is_warmup: number; ts: string }
 export interface HistorySession {
   workout_id: string; local_day: string; started_at: string; name: string | null
@@ -142,9 +144,10 @@ export function fmtMinutes(min: number): string {
   const m = Math.max(0, Math.round(min))
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`
 }
-/** "52 min · 18 sets · 7,420 lb · 2 PRs" */
-export function summaryLine(minutes: number, stats: WorkoutStats, prs: number, unit: string): string {
-  const parts = [fmtMinutes(minutes), `${stats.sets} set${stats.sets === 1 ? '' : 's'}`, fmtVolume(stats.volume, unit)]
+/** "52 min · 18 sets · 7,420 lb · 2 PRs"; with no stats at hand (nothing local or cached) just the duration. */
+export function summaryLine(minutes: number, stats: WorkoutStats | null, prs: number, unit: string): string {
+  const parts = [fmtMinutes(minutes)]
+  if (stats) parts.push(`${stats.sets} set${stats.sets === 1 ? '' : 's'}`, fmtVolume(stats.volume, unit))
   if (prs > 0) parts.push(`${prs} PR${prs === 1 ? '' : 's'}`)
   return parts.join(' · ')
 }
@@ -169,6 +172,15 @@ export function lastSessionSets(p: LastSetsPayload | undefined, excludeWorkoutId
   if (!first) return null
   const sets = p.sets.filter((s) => live(s) && s.workout_id === first.workout_id).sort((a, b) => a.set_no - b.set_no)
   return { day: first.local_day, sets }
+}
+
+/**
+ * The server's best e1RM of an exercise outside `excludeWorkoutId` (null: no other workout has a working set). The
+ * payload covers every workout, so bests[] (top two) makes the exclusion exact without a per-workout request or cache.
+ */
+export function serverBestFor(p: LastSetsPayload, excludeWorkoutId: string | null): number | null {
+  if (!Array.isArray(p.bests)) return p.best_e1rm ?? null // a copy cached by an older build
+  return p.bests.find((b) => b.workout_id !== excludeWorkoutId)?.best ?? null
 }
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -218,7 +230,14 @@ export function ensureActive(): Promise<void> {
 }
 function persistActive(): void {
   const a = active.value
-  void (a ? set(ACTIVE_KEY, a) : del(ACTIVE_KEY)).catch(() => {})
+  try { void (a ? set(ACTIVE_KEY, a) : del(ACTIVE_KEY)).catch(() => {}) } catch { /* IndexedDB unavailable */ }
+}
+/** Drop the IndexedDB copy of `workoutId` when it is the one persisted there (a workout finished from Today after a reload). */
+async function clearPersistedActive(workoutId: string): Promise<void> {
+  try {
+    const p = await get<ActiveState>(ACTIVE_KEY)
+    if (p?.workout?.id === workoutId) await del(ACTIVE_KEY)
+  } catch { /* no IndexedDB */ }
 }
 
 const sortExercises = (list: Exercise[]) =>
@@ -269,10 +288,13 @@ export async function loadTemplate(name: string | null): Promise<TemplatePayload
   return r.data
 }
 
-export async function loadLastSets(exerciseId: string, excludeWorkoutId: string | null): Promise<LastSetsPayload | null> {
+/**
+ * The last 10 working sets and the best e1RM per workout of an exercise, every workout included: the one cache entry
+ * per exercise is then complete offline (the running workout is skipped by lastSessionSets / serverBestFor instead).
+ */
+export async function loadLastSets(exerciseId: string): Promise<LastSetsPayload | null> {
   try {
-    const q = excludeWorkoutId ? `&exclude=${encodeURIComponent(excludeWorkoutId)}` : ''
-    const r = await apiGet<LastSetsPayload>(`/api/lift/last-sets?exercise_id=${encodeURIComponent(exerciseId)}${q}`, `lastsets:${exerciseId}`)
+    const r = await apiGet<LastSetsPayload>(`/api/lift/last-sets?exercise_id=${encodeURIComponent(exerciseId)}`, `lastsets:${exerciseId}`)
     lastSets.value = { ...lastSets.value, [exerciseId]: r.data }
     return r.data
   } catch {
@@ -306,7 +328,7 @@ export async function startWorkout(name: string | null, template: TemplatePayloa
   active.value = { workout, exercise_ids, sets: [], pr_ids: [] }
   persistActive()
   await enqueue('workouts', workout)
-  for (const id of exercise_ids) void loadLastSets(id, workout.id) // warm the cache for the gym
+  for (const id of exercise_ids) void loadLastSets(id) // warm the cache for the gym
   return workout
 }
 
@@ -343,7 +365,7 @@ export async function openWorkout(id: string): Promise<OpenResult> {
   for (const s of sets) if (!pr_ids.includes(s.id) && mine?.pr_ids.includes(s.id)) pr_ids.push(s.id)
   active.value = { workout: mine?.workout.updated_at && mine.workout.updated_at > w.updated_at ? mine.workout : w, exercise_ids, sets, pr_ids }
   persistActive()
-  for (const eid of exercise_ids) void loadLastSets(eid, id)
+  for (const eid of exercise_ids) void loadLastSets(eid)
   return 'active'
 }
 
@@ -353,7 +375,7 @@ export function addExerciseToWorkout(exerciseId: string): void {
   if (!a || a.exercise_ids.includes(exerciseId)) return
   active.value = { ...a, exercise_ids: [...a.exercise_ids, exerciseId] }
   persistActive()
-  void loadLastSets(exerciseId, a.workout.id)
+  void loadLastSets(exerciseId)
 }
 
 export function removeExerciseFromWorkout(exerciseId: string): void {
@@ -390,9 +412,15 @@ export async function updateExercise(ex: Exercise, patch: ExercisePatch): Promis
   return row
 }
 
-/** The best e1RM of an exercise before `ts`: server history (last-sets) plus this workout's earlier sets. */
-export function priorBestFor(a: ActiveState, exerciseId: string, ts: string, excludeSetId: string | null = null): number | null {
-  const server = lastSets.value[exerciseId]?.best_e1rm ?? null
+/**
+ * The best e1RM of an exercise before `ts`: server history (last-sets, outside this workout) plus this workout's
+ * earlier sets. `undefined` while the server side is unknown (fetch still in flight, or offline with no cached copy):
+ * "no history yet" and "history not loaded" are different answers, and only the first makes a set a PR.
+ */
+export function priorBestFor(a: ActiveState, exerciseId: string, ts: string, excludeSetId: string | null = null): number | null | undefined {
+  const p = lastSets.value[exerciseId]
+  if (!p) return undefined
+  const server = serverBestFor(p, a.workout.id)
   const earlier = a.sets.filter((s) => s.exercise_id === exerciseId && s.id !== excludeSetId && s.ts < ts)
   const local = bestE1rm(earlier)
   if (server === null) return local
@@ -400,7 +428,10 @@ export function priorBestFor(a: ActiveState, exerciseId: string, ts: string, exc
   return Math.max(server, local)
 }
 
-/** Log the next set of an exercise in the active workout. Returns the row and whether it was a PR. */
+/**
+ * Log the next set of an exercise in the active workout. Returns the row and whether it was a PR; with the exercise's
+ * history still unknown the set is logged at once without a PR claim, and the badge is added when the history arrives.
+ */
 export async function logSet(exerciseId: string, reps: number, weight: number, isWarmup: boolean): Promise<{ set: SetRow; pr: boolean }> {
   const a = active.value
   if (!a) throw new Error('No active workout')
@@ -409,7 +440,8 @@ export async function logSet(exerciseId: string, reps: number, weight: number, i
     id: uuid(), workout_id: a.workout.id, exercise_id: exerciseId, set_no: nextSetNo(a.sets, a.workout.id, exerciseId),
     reps: Math.max(1, Math.round(reps)), weight: Math.max(0, r1(weight)), is_warmup: isWarmup ? 1 : 0, ts, updated_at: ts, deleted_at: null,
   }
-  const pr = isPR(row, priorBestFor(a, exerciseId, ts))
+  const prior = priorBestFor(a, exerciseId, ts)
+  const pr = prior !== undefined && isPR(row, prior)
   const firstOfExercise = !a.sets.some((s) => s.exercise_id === exerciseId)
   if (pr) active.value = { ...a, pr_ids: [...a.pr_ids, row.id] }
   await enqueue('sets', row)
@@ -417,7 +449,19 @@ export async function logSet(exerciseId: string, reps: number, weight: number, i
     const ex = exercises.value.find((e) => e.id === exerciseId)
     if (ex) await enqueue('exercises', { ...ex, use_count: ex.use_count + 1, last_used_at: ts, updated_at: ts })
   }
+  if (prior === undefined && !row.is_warmup) void flagWhenKnown(row)
   return { set: row, pr }
+}
+
+/** A set logged while its exercise's history was unknown: fetch it (or the cached copy) and add the PR badge if it earned one. */
+async function flagWhenKnown(row: SetRow): Promise<void> {
+  if (!(await loadLastSets(row.exercise_id))) return
+  const a = active.value
+  if (!a || a.workout.id !== row.workout_id || a.pr_ids.includes(row.id) || !a.sets.some((s) => s.id === row.id)) return
+  const prior = priorBestFor(a, row.exercise_id, row.ts, row.id)
+  if (prior === undefined || !isPR(row, prior)) return
+  active.value = { ...a, pr_ids: [...a.pr_ids, row.id] }
+  persistActive()
 }
 
 export async function editSet(s: SetRow, patch: { reps?: number; weight?: number; is_warmup?: boolean }): Promise<SetRow> {
@@ -430,8 +474,11 @@ export async function editSet(s: SetRow, patch: { reps?: number; weight?: number
   }
   const a = active.value
   if (a && a.workout.id === row.workout_id) {
-    const pr = isPR(row, priorBestFor(a, row.exercise_id, row.ts, row.id))
-    active.value = { ...a, pr_ids: pr ? [...new Set([...a.pr_ids, row.id])] : a.pr_ids.filter((id) => id !== row.id) }
+    const prior = priorBestFor(a, row.exercise_id, row.ts, row.id)
+    if (prior !== undefined) { // history unknown: keep the badge as it was rather than guess
+      const pr = isPR(row, prior)
+      active.value = { ...a, pr_ids: pr ? [...new Set([...a.pr_ids, row.id])] : a.pr_ids.filter((id) => id !== row.id) }
+    }
   }
   await enqueue('sets', row)
   return row
@@ -442,19 +489,46 @@ export async function deleteSet(s: SetRow): Promise<void> {
   await enqueue('sets', { ...s, updated_at: ts, deleted_at: ts })
 }
 
-export interface FinishSummary { minutes: number; stats: WorkoutStats; prs: number; line: string }
+/** stats is null when neither this device nor the server (or its cached copy) could say what was logged. */
+export interface FinishSummary { minutes: number; stats: WorkoutStats | null; prs: number; line: string }
 
-/** Finish a workout (default: now). The Today strip, the active state and the history list update at once. */
+/**
+ * Finish a workout (default: now). The Today strip, the active state and the history list update at once. The summary
+ * counts this device's sets (restored from IndexedDB first: Today's End button runs before the Lift tab ever opened),
+ * else the server's copy of a workout run elsewhere; with neither at hand the line is just the duration, never "0 sets".
+ */
 export async function finishWorkout(w: Workout, endedAt: string = nowIso(), endedBy: 'user' | 'auto' = 'user'): Promise<FinishSummary> {
+  await ensureActive()
   const a = active.value?.workout.id === w.id ? active.value : null
-  const sets = a?.sets ?? []
-  const stats = workoutStats(sets)
+  let stats: WorkoutStats | null = null
+  let prs = 0
+  if (a) {
+    stats = workoutStats(a.sets)
+    prs = a.pr_ids.filter((id) => a.sets.some((s) => s.id === id && !s.is_warmup)).length
+  } else {
+    const remote = await remoteStats(w.id)
+    if (remote) ({ stats, prs } = remote)
+    void clearPersistedActive(w.id)
+  }
   const minutes = (new Date(endedAt).getTime() - new Date(w.started_at).getTime()) / 60000
-  const prs = a ? a.pr_ids.filter((id) => sets.some((s) => s.id === id && !s.is_warmup)).length : 0
   const row: Workout = { ...w, ended_at: endedAt, ended_by: endedBy, updated_at: nowIso() }
   if (w.name) templates.delete(normName(w.name)) // the next start of this template should see this session
   await enqueue('workouts', row)
   return { minutes, stats, prs, line: summaryLine(minutes, stats, prs, settings.value.weight_unit) }
+}
+
+/** Working sets and PRs of a workout this device did not run: the server's detail (or its cached copy) plus anything still queued. */
+async function remoteStats(workoutId: string): Promise<{ stats: WorkoutStats; prs: number } | null> {
+  try {
+    const { data } = await loadWorkoutDetail(workoutId)
+    const prIds = new Set(data.sets.filter((s) => isPR(s, s.prior_best)).map((s) => s.id))
+    let sets: SetRow[] = data.sets
+    await replayQueued('sets', (row) => { const s = row as unknown as SetRow; if (s.workout_id === workoutId) sets = upsertById(sets, s) })
+    sets = sets.filter(live)
+    return { stats: workoutStats(sets), prs: sets.filter((s) => prIds.has(s.id) && !s.is_warmup).length }
+  } catch {
+    return null
+  }
 }
 
 export async function renameWorkout(w: Workout, name: string | null): Promise<void> {
@@ -551,6 +625,39 @@ outbox.onEnqueue((table, row) => {
 outbox.onFlushed((items) => {
   for (const it of items) if (it.table === 'workouts') queuedWorkoutIds.delete(String(it.row['id']))
 })
+
+// ---- rejected writes --------------------------------------------------------------------------------------
+
+export interface Rejection { id: number; table: string; key: string; reason: string; label: string; at: string }
+/** Lift rows the server refused (the outbox drops them for good); the workout screen shows each until dismissed. */
+export const rejections = signal<Rejection[]>([])
+let rejectionSeq = 0
+export function dismissRejection(id: number): void {
+  rejections.value = rejections.value.filter((r) => r.id !== id)
+}
+
+/**
+ * A lift row the server rejected. A set of the running workout leaves the local mirror (the server will never have
+ * it), so the set list, numbering and summary match what was saved, and the notice asks to log it again. main.tsx
+ * already toasts every rejection for a few seconds; this keeps the lift ones in view on the workout screen.
+ */
+export function onWriteRejected(table: string, key: string, reason: string): void {
+  if (table !== 'sets' && table !== 'workouts' && table !== 'exercises') return
+  const a = active.value
+  let label: string
+  if (table === 'sets') {
+    const s = a?.sets.find((x) => x.id === key)
+    if (s) {
+      const name = exercises.value.find((e) => e.id === s.exercise_id)?.name ?? 'this exercise'
+      label = `Set ${s.set_no} of ${name} (${fmtWeight(s.weight)}×${s.reps}) was not saved. Log it again.`
+      applySetRow({ ...s, deleted_at: nowIso() }) // local only: nothing to enqueue, the server never had it
+    } else label = 'A set was not saved on the server.'
+  } else if (table === 'workouts') {
+    label = a?.workout.id === key ? 'This workout was not saved on the server.' : 'A workout was not saved on the server.'
+  } else label = 'An exercise was not saved on the server.'
+  rejections.value = [...rejections.value.slice(-4), { id: ++rejectionSeq, table, key, reason, label, at: nowIso() }]
+}
+outbox.onReject(onWriteRejected)
 
 // A Today payload fetched while our new workout was still queued does not know about it: put it back.
 effect(() => {
