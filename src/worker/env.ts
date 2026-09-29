@@ -12,6 +12,15 @@ export interface Env {
   USDA_KEY?: string
 }
 
+export interface Route {
+  method: string
+  /** Exact path, or a pattern with ':name' segments (each captures one path segment into RouteContext.params). */
+  path: string
+  /** Roles allowed on the route; an empty list means public (no token needed). */
+  roles: readonly Role[]
+  handler: (c: RouteContext) => Promise<Response>
+}
+
 export interface RouteContext {
   request: Request
   env: Env

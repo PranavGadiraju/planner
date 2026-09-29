@@ -430,3 +430,7 @@ input[type="number"] { -moz-appearance: textfield; }
 .fade { animation: fade-in 200ms ease-out; }
 .hidden { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---- quick actions (Today) ---------------------------------------------------------------------- */
+.quick-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 12px; }
+.quick-action { min-height: 48px; flex-direction: column; gap: 4px; font-size: 12px; padding: 6px 4px; border-radius: 14px; }

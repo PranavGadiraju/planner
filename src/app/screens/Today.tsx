@@ -2,17 +2,21 @@
 import { useEffect, useState } from 'preact/hooks'
 import type { RoutineItem, RoutineLog } from '@shared/types'
 import { localDay, zonedToUTC } from '@shared/tz'
+import { routineIsDone } from '@shared/routine'
 import { TopBar } from '../components/TopBar'
 import { RoutineCircle } from '../components/RoutineCircle'
 import { SleepCard } from '../components/SleepCard'
 import { CheckinCard } from '../components/CheckinCard'
 import { HealthStrip } from '../components/HealthStrip'
+import { RunningWorkout } from '../components/RunningWorkout'
+import { RunningSession } from '../components/RunningSession'
+import { QuickActions } from '../components/QuickActions'
 import { DayRing } from '../components/DayRing'
 import { Sheet } from '../components/Sheet'
 import { Icon } from '../components/Icon'
 import { toast } from '../components/Toast'
 import { navigate } from '../router'
-import { dayLabel, durationLabel, hhmm, localHour } from '../data/format'
+import { dayLabel, hhmm, localHour } from '../data/format'
 import { editRoutineTimes, loadError, loadToday, loading, now, syncState, tapRoutineLocal, today, undoRoutine } from '../data/store'
 import { dayState, loadDay, watchDay } from '../data/day'
 import { SHORT_LABELS, blockColor, hm, hourDominant, ringSummary, stripSegments } from '../data/daymath'
@@ -50,6 +54,7 @@ export function Today() {
           <>
             <DayRingCard day={day} />
             <RoutineCard p={p} day={day} at={at} onTap={onTap} onLongPress={setEditing} />
+            <QuickActions />
             <SleepCard sleep={p.sleep} tz={p.tz} now={at} />
             <CheckinCard checkin={p.checkin} day={day} hour={localHour(at, p.tz)} />
             <RunningStrip p={p} at={at} />
@@ -124,7 +129,7 @@ function RoutineCard({ p, day, at, onTap, onLongPress }: {
   onLongPress: (item: RoutineItem) => void
 }) {
   const logs = new Map(p.routine_log.filter((r) => r.local_day === day && !r.deleted_at).map((r) => [r.item_id, r]))
-  const done = p.routine_items.filter((i) => logs.get(i.id)?.ended_at).length
+  const done = p.routine_items.filter((i) => { const l = logs.get(i.id); return l && routineIsDone(l, at) }).length
   return (
     <section class="card" aria-label="Morning routine">
       <div class="card-head">
@@ -156,13 +161,12 @@ function RunningStrip({ p, at }: { p: NonNullable<typeof today.value>; at: Date 
   const w = p.running.workout
   const s = p.running.session
   if (!w && !s) return null
-  const since = (iso: string) => durationLabel((at.getTime() - new Date(iso).getTime()) / 60000)
   return (
     <div class="banner banner-info">
       <span class="grow small">
-        {w && <span><span class="badge badge-workout">workout</span> {w.name ?? 'Workout'} running · {since(w.started_at)}</span>}
+        {w && <RunningWorkout workout={w} at={at} />}
         {w && s && <br />}
-        {s && <span><span class="badge">session</span> {s.project_name} · {since(s.started_at)}</span>}
+        {s && <RunningSession session={s} at={at} />}
       </span>
     </div>
   )

@@ -149,4 +149,10 @@ check "scheduled (prune tap_log)"   200 '^ok$'                            "$BASE
 check "cron left a health row"      200 '"source":"cron","last_ok_at":"20' -H "$APP" "$BASE/api/health/automations"
 check "static fallback"             200 'planner'                         "$BASE/"
 
+# Per-area smoke scripts (scripts/smoke-<area>.sh) run against the same server with the same tokens.
+for extra in scripts/smoke-*.sh; do
+  [ -f "$extra" ] || continue
+  echo "== running $extra"
+  if BASE="$BASE" APP_TOKEN="$APP_TOKEN" SHORTCUT_TOKEN="$SHORTCUT_TOKEN" MAC_TOKEN="$MAC_TOKEN" TZ_NAME="$TZ_NAME" bash "$extra"; then echo "ok   $extra"; else echo "FAIL $extra"; FAIL=1; fi
+done
 if [ "$FAIL" = 0 ]; then echo "== smoke passed"; else echo "== smoke FAILED (wrangler log: $LOG)"; exit 1; fi

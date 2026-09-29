@@ -1,5 +1,5 @@
 // planner Worker: /api/* JSON router + nightly cron; everything else is the PWA's static assets.
-import type { Env, RouteContext } from './env'
+import type { Env, Route } from './env'
 import type { Role } from '../shared/types'
 import { bearerToken, roleForToken } from './auth'
 import { HttpError, error, errorMessage } from './http'
@@ -13,15 +13,9 @@ import { day } from './routes/day'
 import { routineItems } from './routes/routine'
 import { automations, tapLog } from './routes/taplog'
 import { settings } from './routes/settings'
-
-interface Route {
-  method: string
-  /** Exact path, or a pattern with ':name' segments (each captures one path segment into RouteContext.params). */
-  path: string
-  /** Roles allowed on the route; an empty list means public (no token needed). */
-  roles: readonly Role[]
-  handler: (c: RouteContext) => Promise<Response>
-}
+import { foodRoutes } from './routes/food'
+import { liftRoutes } from './routes/lift'
+import { workRoutes } from './routes/work'
 
 const ROUTES: readonly Route[] = [
   { method: 'GET', path: '/api/health', roles: [], handler: health },
@@ -34,10 +28,10 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', path: '/api/tap/log', roles: ['app'], handler: tapLog },
   { method: 'GET', path: '/api/health/automations', roles: ['app'], handler: automations },
   { method: 'GET', path: '/api/settings', roles: ['app'], handler: settings },
-  // Later milestones: M3 /api/foods, /api/meals, /api/lookup/*, POST /api/foods + /api/food-log; M4 /api/exercises,
-  // /api/workouts, /api/exercise/:id/history, POST /api/sets; M5 /api/projects, /api/sessions, /api/projects/:id/log,
-  // POST /api/sessions + /api/time-blocks; M6 POST /api/screentime; M7 /api/summary, /api/rollup, /api/cron/run,
-  // /api/export.
+  ...foodRoutes, // M3: /api/foods, /api/meals, /api/food-log, /api/lookup/*
+  ...liftRoutes, // M4: /api/exercises, /api/workouts, /api/sets
+  ...workRoutes, // M5: /api/projects, /api/sessions, /api/time-blocks
+  // Later: M6 POST /api/screentime; M7 /api/summary, /api/rollup, /api/cron/run, /api/export.
 ]
 
 async function handleApi(request: Request, env: Env, url: URL): Promise<Response> {

@@ -1,11 +1,14 @@
-// Hash router: '#/' today, '#/food', '#/lift', '#/work', '#/day' (+ '#/day/YYYY-MM-DD'), '#/settings', '#/settings/shortcut', ...
+// Hash router. Top-level tabs own a prefix and read the remaining segments themselves:
+//   '#/'                today            '#/day' | '#/day/YYYY-MM-DD'   the day view
+//   '#/food[/...]'      food tab         '#/lift[/...]'                 lift tab
+//   '#/work[/...]'      work tab         '#/settings[/shortcut|taps|routine]'
 import { signal } from '@preact/signals'
 
 export type Route =
   | { name: 'today' }
-  | { name: 'food' }
-  | { name: 'lift' }
-  | { name: 'work' }
+  | { name: 'food'; rest: string[] }
+  | { name: 'lift'; rest: string[] }
+  | { name: 'work'; rest: string[] }
   | { name: 'day'; date: string | null }
   | { name: 'settings' }
   | { name: 'shortcut' }
@@ -21,19 +24,21 @@ export const TABS: { route: Route['name']; hash: string; label: string }[] = [
 ]
 
 export function parseHash(hash: string): Route {
-  const path = hash.replace(/^#/, '').replace(/\/+$/, '') || '/'
-  const day = /^\/day\/(\d{4}-\d{2}-\d{2})$/.exec(path)
-  if (day) return { name: 'day', date: day[1] ?? null }
-  switch (path) {
-    case '/': return { name: 'today' }
-    case '/food': return { name: 'food' }
-    case '/lift': return { name: 'lift' }
-    case '/work': return { name: 'work' }
-    case '/day': return { name: 'day', date: null }
-    case '/settings': return { name: 'settings' }
-    case '/settings/shortcut': return { name: 'shortcut' }
-    case '/settings/taps': return { name: 'taps' }
-    case '/settings/routine': return { name: 'routine' }
+  const path = hash.replace(/^#/, '').split('?')[0] ?? ''
+  const [head, ...rest] = path.split('/').map(decodeURIComponent).filter(Boolean)
+  switch (head) {
+    case undefined: return { name: 'today' }
+    case 'food': return { name: 'food', rest }
+    case 'lift': return { name: 'lift', rest }
+    case 'work': return { name: 'work', rest }
+    case 'day':
+      if (rest[0] === undefined) return { name: 'day', date: null }
+      return /^\d{4}-\d{2}-\d{2}$/.test(rest[0]) ? { name: 'day', date: rest[0] } : { name: 'today' }
+    case 'settings':
+      if (rest[0] === 'shortcut') return { name: 'shortcut' }
+      if (rest[0] === 'taps') return { name: 'taps' }
+      if (rest[0] === 'routine') return { name: 'routine' }
+      return { name: 'settings' }
     default: return { name: 'today' }
   }
 }
