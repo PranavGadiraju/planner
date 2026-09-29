@@ -11,7 +11,7 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["vite/client", "vite-plugin-pwa/client"],
+    "types": ["vite/client", "vite-plugin-pwa/client", "node"],
     "paths": { "@shared/*": ["./src/shared/*"] }
   },
   "include": ["src/app", "src/shared", "test", "vite.config.ts"]
