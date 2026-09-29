@@ -6,6 +6,7 @@ import { Settings } from './screens/Settings'
 import { ShortcutSetup } from './screens/ShortcutSetup'
 import { TapLog } from './screens/TapLog'
 import { RoutineEditor } from './screens/RoutineEditor'
+import { MacApps } from './screens/MacApps'
 import { Day } from './screens/Day'
 import { Food } from './screens/Food'
 import { Lift } from './screens/Lift'
@@ -24,6 +25,7 @@ function Screen() {
     case 'shortcut': return <ShortcutSetup />
     case 'taps': return <TapLog />
     case 'routine': return <RoutineEditor />
+    case 'apps': return <MacApps />
   }
 }
 

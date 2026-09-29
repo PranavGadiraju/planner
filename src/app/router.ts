@@ -14,6 +14,7 @@ export type Route =
   | { name: 'shortcut' }
   | { name: 'taps' }
   | { name: 'routine' }
+  | { name: 'apps' }
 
 export const TABS: { route: Route['name']; hash: string; label: string }[] = [
   { route: 'today', hash: '#/', label: 'Today' },
@@ -38,6 +39,7 @@ export function parseHash(hash: string): Route {
       if (rest[0] === 'shortcut') return { name: 'shortcut' }
       if (rest[0] === 'taps') return { name: 'taps' }
       if (rest[0] === 'routine') return { name: 'routine' }
+      if (rest[0] === 'apps') return { name: 'apps' }
       return { name: 'settings' }
     default: return { name: 'today' }
   }
