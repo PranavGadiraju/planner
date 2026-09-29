@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyRoutineTap, routineDurationMin } from '@shared/routine'
+import { applyRoutineTap, routineDurationMin, routineIsDone } from '@shared/routine'
 import type { RoutineLog } from '@shared/types'
 
 const ctx = { local_day: '2026-09-28', item_id: 'run', source: 'nfc' as const }
@@ -27,6 +27,13 @@ describe('routine taps', () => {
     expect(r.action).toBe('routine_started')
     expect(r.row.deleted_at).toBeNull()
     expect(r.row.started_at).toBe(t(20).toISOString())
+  })
+  it('a tap 3 h or more after the start changes nothing (the item was implicitly done)', () => {
+    const started = applyRoutineTap(null, t(0), ctx).row
+    const late = new Date(t(0).getTime() + 3 * 3600_000)
+    expect(applyRoutineTap(started, late, ctx).action).toBe('routine_already_done')
+    expect(routineIsDone(started, late)).toBe(true)
+    expect(routineIsDone(started, t(30))).toBe(false)
   })
   it('uses the default duration when only one tap happened', () => {
     expect(routineDurationMin(applyRoutineTap(null, t(0), ctx).row, 15)).toBe(15)

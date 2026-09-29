@@ -3,6 +3,7 @@
 import { useRef } from 'preact/hooks'
 import type { RoutineItem, RoutineLog } from '@shared/types'
 import { Icon, routineIconName } from './Icon'
+import { routineIsDone } from '@shared/routine'
 import { elapsedLabel, hhmm, shortName } from '../data/format'
 
 const R = 26
@@ -11,9 +12,9 @@ const LONG_PRESS_MS = 500
 
 export type CircleState = 'idle' | 'running' | 'done'
 
-export function circleState(log: RoutineLog | undefined): CircleState {
+export function circleState(log: RoutineLog | undefined, now: Date = new Date()): CircleState {
   if (!log || log.deleted_at) return 'idle'
-  return log.ended_at ? 'done' : 'running'
+  return routineIsDone(log, now) ? 'done' : 'running'
 }
 
 export function RoutineCircle({ item, log, tz, now, onTap, onLongPress }: {
@@ -26,7 +27,7 @@ export function RoutineCircle({ item, log, tz, now, onTap, onLongPress }: {
 }) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fired = useRef(false)
-  const state = circleState(log)
+  const state = circleState(log, now)
 
   const clear = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null } }
   const down = () => {
@@ -47,7 +48,7 @@ export function RoutineCircle({ item, log, tz, now, onTap, onLongPress }: {
   }
 
   const title =
-    state === 'done' && log ? `${item.name}: ${hhmm(log.started_at, tz)}–${hhmm(log.ended_at, tz)}` :
+    state === 'done' && log ? `${item.name}: ${hhmm(log.started_at, tz)}–${log.ended_at ? hhmm(log.ended_at, tz) : `about ${item.default_min} min`}` :
     state === 'running' && log ? `${item.name}: started ${hhmm(log.started_at, tz)}` : `${item.name}: not started`
 
   return (
@@ -85,7 +86,7 @@ export function RoutineCircle({ item, log, tz, now, onTap, onLongPress }: {
         <span class="circle-inner num">
           {state === 'idle' && <Icon name={routineIconName(item.icon, item.id)} size={24} stroke={1.6} />}
           {state === 'running' && log && elapsedLabel(log.started_at, now)}
-          {state === 'done' && log && hhmm(log.ended_at, tz)}
+          {state === 'done' && log && hhmm(log.ended_at ?? log.started_at, tz)}
         </span>
       </span>
       <span class="routine-label">{shortName(item)}</span>

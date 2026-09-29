@@ -2,13 +2,15 @@ import type { RoutineLog, Source } from './types'
 
 export const ROUTINE_DUP_MS = 2 * 60_000
 export const ROUTINE_FINISH_MS = 3 * 60_000
+/** After this long without a second tap the item counts as done (default minutes); a later tap changes nothing. */
+export const ROUTINE_MAX_MS = 3 * 3600_000
 
 export type RoutineTapAction = 'routine_started' | 'routine_duplicate' | 'routine_ignored' | 'routine_finished' | 'routine_already_done'
 export interface RoutineTapResult { action: RoutineTapAction; row: RoutineLog; changed: boolean }
 
 /**
  * First tap of the day starts the item; a second tap >= 3 min later ends it; taps < 2 min apart are duplicates;
- * taps between 2 and 3 min are ignored; anything after the item is finished is "already done".
+ * taps between 2 and 3 min are ignored; anything after the item is finished, or more than 3 h after it started, is "already done".
  * A tombstoned row (undone in the app) is re-activated by a new tap.
  */
 export function applyRoutineTap(
@@ -28,7 +30,13 @@ export function applyRoutineTap(
   const delta = now.getTime() - new Date(existing.started_at).getTime()
   if (delta < ROUTINE_DUP_MS) return { action: 'routine_duplicate', row: existing, changed: false }
   if (delta < ROUTINE_FINISH_MS) return { action: 'routine_ignored', row: existing, changed: false }
+  if (delta >= ROUTINE_MAX_MS) return { action: 'routine_already_done', row: existing, changed: false }
   return { action: 'routine_finished', changed: true, row: { ...existing, ended_at: nowIso, updated_at: nowIso } }
+}
+
+/** True when a started item should be shown as done: it has an end, or it started more than 3 h ago. */
+export function routineIsDone(row: RoutineLog, now: Date): boolean {
+  return !!row.ended_at || now.getTime() - new Date(row.started_at).getTime() >= ROUTINE_MAX_MS
 }
 
 export function routineDurationMin(row: RoutineLog, defaultMin: number): number {

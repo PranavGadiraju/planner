@@ -187,7 +187,7 @@ function Timeline({ data, isToday, onBlock, onGap }: { data: DayPayload; isToday
             >
               {h >= LABEL_MIN_PX && <span class="tl-label">Unknown</span>}
               {h >= LABEL_MIN_PX && <span class="tl-dur num">{hm(h)}</span>}
-              <span class="tl-plus" aria-hidden="true"><Icon name="plus" size={14} stroke={2.2} /></span>
+              {h >= 20 && <span class="tl-plus" aria-hidden="true"><Icon name="plus" size={14} stroke={2.2} /></span>}
             </button>
           )
         }
