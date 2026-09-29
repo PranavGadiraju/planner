@@ -1,0 +1,364 @@
+#!/usr/bin/env node
+// planner CLI - zero-dependency Node (>= 20, ESM) client for the planner Worker, used by Claude Code and by hand.
+//
+//   config:  ~/.config/planner/config.json  {"url": "https://planner.<sub>.workers.dev"}   (or PLANNER_URL env)
+//   token:   PLANNER_TOKEN env, else the login Keychain item "planner-app-token"
+//            (security find-generic-password -s planner-app-token -w). The token is never printed.
+//
+// Exit codes: 0 ok, 1 error (network, auth, server), 2 usage / not available yet.
+
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
+const execFileP = promisify(execFile)
+const CONFIG_DIR = process.env.PLANNER_CONFIG_DIR || join(homedir(), '.config', 'planner')
+const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
+const KEYCHAIN_SERVICE = 'planner-app-token'
+const TIMEOUT_MS = 15000
+
+const USAGE = `planner - CLI for the planner Worker
+
+Usage: planner <command> [options]
+
+Available now (milestone 1):
+  me                      validate the token; prints role, tz, server time, today
+  health                  liveness (/api/health) + automation health rows
+  today [--json]          pretty-print today: routine state, sleep, streak, running timers, health
+  tap <item> [--at ISO]   POST /api/tap as the app role (shower|run|stretch|shoulders|journal|bed|wake|winddown)
+  taps [--json]           last 100 tap_log rows (newest first)
+  config [--url URL]      show or set the Worker URL in ~/.config/planner/config.json
+
+Arriving in later milestones (exit 2 for now):
+  food add --json         (M3)   food search <q>     (M3)   eat ...        (M3)   day [date]   (M3)
+  block add ...           (M3)   session add ...     (M5)   set add ...    (M5)
+  rollup [day]            (M7)   export              (M7)   screentime phone --day --hours '{...}'  (M8)
+
+Global: --json prints the raw API response. --help / -h prints this.
+Token: PLANNER_TOKEN env or Keychain item "${KEYCHAIN_SERVICE}" (security add-generic-password -U -a "$USER" -s ${KEYCHAIN_SERVICE} -w).
+`
+
+const LATER = {
+  'food add': 3, 'food search': 3, eat: 3, day: 3, 'block add': 3,
+  'session add': 5, 'set add': 5,
+  rollup: 7, export: 7,
+  'screentime phone': 8,
+}
+
+// ---------------------------------------------------------------- args
+
+function parseArgs(argv) {
+  const positional = []
+  const flags = {}
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a === '--') { positional.push(...argv.slice(i + 1)); break }
+    if (a.startsWith('--')) {
+      const eq = a.indexOf('=')
+      if (eq > 0) { flags[a.slice(2, eq)] = a.slice(eq + 1); continue }
+      const key = a.slice(2)
+      const next = argv[i + 1]
+      if (next !== undefined && !next.startsWith('--')) { flags[key] = next; i++ } else flags[key] = true
+    } else if (a === '-h') {
+      flags.help = true
+    } else {
+      positional.push(a)
+    }
+  }
+  return { positional, flags }
+}
+
+// ---------------------------------------------------------------- config + token
+
+async function readConfig() {
+  try {
+    const raw = await readFile(CONFIG_FILE, 'utf8')
+    const cfg = JSON.parse(raw)
+    return cfg && typeof cfg === 'object' ? cfg : {}
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return {}
+    throw new Error(`cannot read ${CONFIG_FILE}: ${e.message}`)
+  }
+}
+
+async function baseUrl() {
+  const env = (process.env.PLANNER_URL || '').trim()
+  const cfg = env ? { url: env } : await readConfig()
+  const url = typeof cfg.url === 'string' ? cfg.url.trim().replace(/\/+$/, '') : ''
+  if (!url) {
+    throw new Error(`no Worker URL. Run: planner config --url https://planner.<sub>.workers.dev  (or set PLANNER_URL)`)
+  }
+  return url
+}
+
+async function token() {
+  const env = (process.env.PLANNER_TOKEN || '').trim()
+  if (env) return env
+  try {
+    const { stdout } = await execFileP('security', ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'], { timeout: 30000 })
+    const t = stdout.trim()
+    if (t) return t
+  } catch {
+    // fall through
+  }
+  throw new Error(`no APP_TOKEN. Set PLANNER_TOKEN or store it: security add-generic-password -U -a "$USER" -s ${KEYCHAIN_SERVICE} -w`)
+}
+
+// ---------------------------------------------------------------- http
+
+function describeFetchError(e) {
+  if (e && e.name === 'TimeoutError') return `timeout after ${TIMEOUT_MS / 1000}s`
+  const c = e && e.cause
+  if (c) {
+    if (c.code) return c.code
+    if (Array.isArray(c.errors) && c.errors.length && c.errors[0].code) return c.errors[0].code
+    if (c.message) return c.message
+  }
+  return (e && e.message) || String(e)
+}
+
+async function api(method, path, { auth = true, body } = {}) {
+  const url = (await baseUrl()) + path
+  const headers = { accept: 'application/json' }
+  if (auth) headers.authorization = `Bearer ${await token()}`
+  if (body !== undefined) headers['content-type'] = 'application/json'
+  let res
+  try {
+    res = await fetch(url, {
+      method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+  } catch (e) {
+    throw new Error(`cannot reach ${url}: ${describeFetchError(e)}`)
+  }
+  const text = await res.text()
+  let data = null
+  try { data = text ? JSON.parse(text) : null } catch { data = { raw: text.slice(0, 300) } }
+  if (res.status === 401) throw new Error(`token rejected (401) by ${url}. Check PLANNER_TOKEN / the "${KEYCHAIN_SERVICE}" Keychain item.`)
+  if (res.status === 403) throw new Error(`forbidden (403): this token's role may not call ${method} ${path}`)
+  if (res.status === 404) throw new Error(`${method} ${path} -> 404 (route not deployed yet, or wrong URL ${url})`)
+  if (!res.ok && !(res.status === 400 && data && typeof data === 'object' && 'action' in data)) {
+    const msg = data && typeof data === 'object' && (data.message || data.error) ? (data.message || data.error) : text.slice(0, 300)
+    throw new Error(`${method} ${path} -> ${res.status}${msg ? `: ${msg}` : ''}`)
+  }
+  return { status: res.status, data }
+}
+
+// ---------------------------------------------------------------- formatting
+
+const pad2 = (n) => String(n).padStart(2, '0')
+
+function localHHMM(iso, tz) {
+  if (!iso) return '--:--'
+  try {
+    return new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso))
+  } catch { return iso }
+}
+function localStamp(iso, tz) {
+  if (!iso) return '-'
+  try {
+    const p = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    }).formatToParts(new Date(iso))
+    const g = (t) => p.find((x) => x.type === t)?.value ?? '00'
+    return `${g('year')}-${g('month')}-${g('day')} ${g('hour')}:${g('minute')}:${g('second')}`
+  } catch { return iso }
+}
+function minutes(a, b) { return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000) }
+function hm(min) {
+  if (min == null || !Number.isFinite(min)) return '?'
+  const s = min < 0 ? '-' : ''
+  const m = Math.abs(min)
+  return m >= 60 ? `${s}${Math.floor(m / 60)}h${pad2(m % 60)}` : `${s}${m} min`
+}
+function ago(iso, now) {
+  if (!iso) return 'never'
+  const m = minutes(iso, now)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m} min ago`
+  if (m < 48 * 60) return `${Math.round(m / 60)} h ago`
+  return `${Math.round(m / 1440)} d ago`
+}
+function signed(n) { return n > 0 ? `+${n}` : String(n) }
+function table(rows) {
+  if (!rows.length) return ''
+  const w = rows[0].map((_, i) => Math.max(...rows.map((r) => String(r[i] ?? '').length)))
+  return rows.map((r) => r.map((c, i) => String(c ?? '').padEnd(w[i])).join('  ').trimEnd()).join('\n')
+}
+
+// ---------------------------------------------------------------- commands
+
+async function cmdConfig(flags) {
+  if (typeof flags.url === 'string' && flags.url) {
+    const url = flags.url.trim().replace(/\/+$/, '')
+    if (!/^https?:\/\//.test(url)) throw new Error('--url must start with http:// or https://')
+    const cfg = await readConfig()
+    await mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 })
+    await writeFile(CONFIG_FILE, JSON.stringify({ ...cfg, url }, null, 2) + '\n', { mode: 0o600 })
+    console.log(`saved ${CONFIG_FILE}`)
+  }
+  let url = '(not set)'
+  try { url = await baseUrl() } catch { /* keep */ }
+  let tok = 'missing'
+  try { await token(); tok = process.env.PLANNER_TOKEN ? 'from PLANNER_TOKEN env' : `from Keychain "${KEYCHAIN_SERVICE}"` } catch { /* keep */ }
+  console.log(`url:    ${url}\ntoken:  ${tok}\nconfig: ${CONFIG_FILE}`)
+}
+
+async function cmdMe(flags) {
+  const { data } = await api('GET', '/api/me')
+  if (flags.json) return console.log(JSON.stringify(data, null, 2))
+  console.log(`role: ${data.role}\ntz: ${data.tz}\nserver_time: ${data.server_time} (${localStamp(data.server_time, data.tz)} local)\ntoday: ${data.today}`)
+}
+
+async function cmdHealth(flags) {
+  const live = await api('GET', '/api/health', { auth: false })
+  let auto = null
+  let autoErr = null
+  try { auto = (await api('GET', '/api/health/automations')).data } catch (e) { autoErr = e.message }
+  if (flags.json) return console.log(JSON.stringify({ health: live.data, automations: auto, automations_error: autoErr }, null, 2))
+  const h = live.data || {}
+  console.log(`worker: ok=${h.ok} version=${h.version} time=${h.time} today=${h.today}`)
+  if (autoErr) { console.log(`automations: ${autoErr}`); return }
+  const rows = (auto && auto.rows) || []
+  if (!rows.length) { console.log('automations: no rows yet (nothing has reported in)'); return }
+  const now = h.time || new Date().toISOString()
+  console.log(table([
+    ['source', 'last ok', 'last error', 'error', 'detail'],
+    ...rows.map((r) => [r.source, r.last_ok_at ? `${ago(r.last_ok_at, now)} (${r.last_ok_at})` : 'never', r.last_error_at ? ago(r.last_error_at, now) : '-', r.last_error || '-', r.detail || '-']),
+  ]))
+}
+
+async function cmdTap(positional, flags) {
+  const item = positional[0]
+  if (!item) throw usage('tap needs an item, e.g. planner tap shower')
+  const body = { item }
+  if (typeof flags.at === 'string') {
+    const d = new Date(flags.at)
+    if (Number.isNaN(d.getTime())) throw usage(`--at must be an ISO timestamp, got ${flags.at}`)
+    body.ts = d.toISOString()
+  }
+  const { status, data } = await api('POST', '/api/tap', { body })
+  if (flags.json) { console.log(JSON.stringify(data, null, 2)); if (!data.ok) process.exitCode = 1; return }
+  console.log(`${data.ok ? 'ok' : `rejected (${status})`}: ${data.action} - ${data.message}${data.local_day ? `  [${data.local_day}]` : ''}`)
+  if (!data.ok) process.exitCode = 1
+}
+
+async function cmdTaps(flags) {
+  const { data } = await api('GET', '/api/tap/log')
+  if (flags.json) return console.log(JSON.stringify(data, null, 2))
+  const taps = data.taps || []
+  if (!taps.length) return console.log('no taps logged yet')
+  let tz = 'UTC'
+  try { tz = (await api('GET', '/api/me')).data.tz || tz } catch { /* UTC fallback */ }
+  console.log(table([['id', `time (${tz})`, 'item', 'role', 'result'], ...taps.map((t) => [t.id, localStamp(t.ts, tz), t.item, t.role, t.result])]))
+}
+
+function routineGlyph(row, now) {
+  if (!row || row.deleted_at) return '○'
+  return row.ended_at ? '●' : '◐'
+}
+
+async function cmdToday(flags) {
+  const { data: t } = await api('GET', '/api/today')
+  if (flags.json) return console.log(JSON.stringify(t, null, 2))
+  const tz = t.tz || t.settings?.tz || 'UTC'
+  const now = t.now
+  const out = []
+  out.push(`Today ${t.today} (${tz}) - now ${localHHMM(now, tz)}`)
+
+  // routine
+  out.push('', 'Routine')
+  const logByItem = new Map((t.routine_log || []).map((r) => [r.item_id, r]))
+  const items = t.routine_items || []
+  let done = 0
+  const rows = items.map((it) => {
+    const row = logByItem.get(it.id)
+    const live = row && !row.deleted_at ? row : null
+    let state = 'not started'
+    if (live && live.ended_at) { done++; state = `done ${localHHMM(live.started_at, tz)} -> ${localHHMM(live.ended_at, tz)} (${hm(minutes(live.started_at, live.ended_at))})` }
+    else if (live) state = `started ${localHHMM(live.started_at, tz)} (${hm(minutes(live.started_at, now))} so far, default ${it.default_min} min)`
+    return [`  ${routineGlyph(live, now)}`, it.name, `[${it.id}]`, state + (live ? ` via ${live.source}` : '')]
+  })
+  out.push(rows.length ? table(rows) : '  (no active routine items)')
+  out.push(`  ${done}/${items.length} done`)
+
+  // sleep
+  const s = t.sleep || {}
+  const grace = t.settings?.late_grace_min ?? 15
+  out.push('', 'Sleep')
+  const fmtNight = (r) => {
+    if (!r) return null
+    const dur = r.wake_ts ? hm(minutes(r.bed_ts, r.wake_ts)) : null
+    const late = `${signed(r.late_min)} min vs ${r.target_bed}${r.late_min > grace ? ' LATE' : ''}`
+    return `in bed ${localHHMM(r.bed_ts, tz)} (${late})` + (r.wake_ts ? ` - up ${localHHMM(r.wake_ts, tz)} (${r.wake_source}) - ${dur}` : ' - no wake yet')
+  }
+  out.push(`  last night (${s.last_night?.night_of ?? '-'}): ${fmtNight(s.last_night) ?? 'no row'}`)
+  out.push(`  tonight (${s.tonight?.night_of ?? '-'}):    ${fmtNight(s.tonight) ?? `not in bed yet (target ${t.settings?.bed_target ?? '?'}, wind-down ${t.settings?.winddown_min ?? '?'} min before)`}`)
+  if (s.open) out.push(`  OPEN: night ${s.open.night_of} has no wake time yet - tap a routine sticker or set it in the app ("When did you wake?")`)
+  out.push(`  streak: ${s.streak ?? 0} night${s.streak === 1 ? '' : 's'} on target (grace ${grace} min)`)
+
+  // running
+  const r = t.running || {}
+  out.push('', 'Running')
+  if (!r.workout && !r.session) out.push('  nothing running')
+  if (r.workout) out.push(`  workout ${r.workout.name || '(unnamed)'} since ${localHHMM(r.workout.started_at, tz)} (${hm(minutes(r.workout.started_at, now))})`)
+  if (r.session) out.push(`  session ${r.session.project_name} since ${localHHMM(r.session.started_at, tz)} (${hm(minutes(r.session.started_at, now))})`)
+
+  // check-in
+  const c = t.checkin
+  out.push('', 'Check-in')
+  out.push(`  AM: ${c?.morning_at ? `${localHHMM(c.morning_at, tz)} ${c.morning_note ? JSON.stringify(c.morning_note) : ''}` : '-'}`)
+  out.push(`  PM: ${c?.evening_at ? `${localHHMM(c.evening_at, tz)} ${c.evening_note ? JSON.stringify(c.evening_note) : ''}` : '-'}`)
+
+  // health
+  const h = t.health || {}
+  out.push('', 'Health')
+  const hrows = h.rows || []
+  if (hrows.length) {
+    out.push(table(hrows.map((x) => [`  ${x.source}`, x.last_ok_at ? `ok ${ago(x.last_ok_at, now)}` : 'never ok', x.last_error_at ? `error ${ago(x.last_error_at, now)}: ${x.last_error || ''}` : '', x.detail || ''])))
+  } else out.push('  no automation rows yet')
+  out.push(`  taps today: ${h.taps_today ?? 0}`)
+  out.push(`  mac last hour: ${h.mac_last_hour ? `${localStamp(h.mac_last_hour, tz)} (${ago(h.mac_last_hour, now)})` : 'none'}`)
+  out.push(`  phone last hour: ${h.phone_last_hour ? `${localStamp(h.phone_last_hour, tz)} (${ago(h.phone_last_hour, now)})` : 'none'}`)
+  out.push(`  apps to categorise: ${h.apps_to_triage ?? 0}`)
+  console.log(out.join('\n'))
+}
+
+// ---------------------------------------------------------------- dispatch
+
+function usage(msg) { const e = new Error(msg); e.usage = true; return e }
+
+async function main() {
+  const { positional, flags } = parseArgs(process.argv.slice(2))
+  const cmd = positional[0]
+  if (!cmd || flags.help || cmd === 'help') { process.stdout.write(USAGE); return }
+  const two = positional.slice(0, 2).join(' ')
+  const later = LATER[two] ?? LATER[cmd]
+  if (later !== undefined) {
+    console.error(`planner ${LATER[two] !== undefined ? two : cmd}: not available until milestone ${later}`)
+    process.exitCode = 2
+    return
+  }
+  switch (cmd) {
+    case 'config': return cmdConfig(flags)
+    case 'me': return cmdMe(flags)
+    case 'health': return cmdHealth(flags)
+    case 'today': return cmdToday(flags)
+    case 'tap': return cmdTap(positional.slice(1), flags)
+    case 'taps': return cmdTaps(flags)
+    default:
+      throw usage(`unknown command: ${cmd}`)
+  }
+}
+
+main().catch((e) => {
+  if (e && e.usage) {
+    console.error(`planner: ${e.message}\n`)
+    process.stderr.write(USAGE)
+    process.exitCode = 2
+    return
+  }
+  console.error(`planner: ${e && e.message ? e.message : e}`)
+  process.exitCode = 1
+})

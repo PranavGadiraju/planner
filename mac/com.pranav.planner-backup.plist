@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  planner: weekly D1 backup (mac/backup.sh) -> ~/planner-backups/<date>.sql
+  Installed by mac/install.sh, which replaces __HOME__ and __REPO__ and copies this file to ~/Library/LaunchAgents/.
+  Runs Sundays at 09:30 local time; RunAtLoad makes the first backup happen right after loading.
+
+  Load:     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.pranav.planner-backup.plist
+  Run now:  launchctl kickstart -k gui/$(id -u)/com.pranav.planner-backup
+  Logs:     ~/Library/Logs/planner-backup.log and .err
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pranav.planner-backup</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>__REPO__/mac/backup.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+
+  <!-- Sundays 09:30 -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>0</integer>
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PLANNER_REPO</key>
+    <string>__REPO__</string>
+    <key>PLANNER_BACKUP_DIR</key>
+    <string>__HOME__/planner-backups</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/planner-backup.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/planner-backup.err</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

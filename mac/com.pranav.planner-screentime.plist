@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  planner: hourly Mac screen-time push (mac/screentime_push.py).
+  Installed by mac/install.sh, which replaces __HOME__ and __PLANNER_URL__ and copies this file to
+  ~/Library/LaunchAgents/. No secrets live here (plists are world-readable); the MAC_TOKEN comes from the
+  login Keychain item "planner-mac-token". /usr/bin/python3 must have Full Disk Access (see README).
+
+  Load:     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.pranav.planner-screentime.plist
+  Run now:  launchctl kickstart -k gui/$(id -u)/com.pranav.planner-screentime
+  Unload:   launchctl bootout gui/$(id -u)/com.pranav.planner-screentime
+  Logs:     ~/Library/Logs/planner-screentime.log and .err
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pranav.planner-screentime</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>__HOME__/bin/screentime_push.py</string>
+  </array>
+
+  <!-- every hour at :05 -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Minute</key>
+    <integer>5</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PLANNER_URL</key>
+    <string>__PLANNER_URL__</string>
+    <key>PATH</key>
+    <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/planner-screentime.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/planner-screentime.err</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LowPriorityIO</key>
+  <true/>
+</dict>
+</plist>
