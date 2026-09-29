@@ -25,10 +25,11 @@ export interface SummaryResponse {
   first_day: string | null
 }
 
+// One row of scalar subqueries (D1 caps the number of terms in a compound SELECT); the minimum is taken in JS.
 const FIRST_DAY_SQL =
-  'SELECT MIN(d) AS d FROM (SELECT MIN(local_day) AS d FROM routine_log UNION ALL SELECT MIN(night_of) FROM sleep ' +
-  'UNION ALL SELECT MIN(local_day) FROM food_log UNION ALL SELECT MIN(local_day) FROM workouts ' +
-  'UNION ALL SELECT MIN(local_day) FROM sessions UNION ALL SELECT MIN(local_day) FROM day_summary)'
+  'SELECT (SELECT MIN(local_day) FROM routine_log) AS a, (SELECT MIN(night_of) FROM sleep) AS b, ' +
+  '(SELECT MIN(local_day) FROM food_log) AS c, (SELECT MIN(local_day) FROM workouts) AS d, ' +
+  '(SELECT MIN(local_day) FROM sessions) AS e, (SELECT MIN(local_day) FROM day_summary) AS f'
 
 /** GET /api/summary?from&to (app) */
 export async function summary(c: RouteContext): Promise<Response> {
@@ -43,8 +44,9 @@ export async function summary(c: RouteContext): Promise<Response> {
     db.prepare('SELECT id, name, color FROM projects WHERE deleted_at IS NULL ORDER BY position, id'),
     db.prepare(FIRST_DAY_SQL),
   ])
-  const firstRaw = ((firstR?.results ?? [])[0] as { d: string | null } | undefined)?.d
-  const firstDay = typeof firstRaw === 'string' ? firstRaw : null
+  const firstRow = (firstR?.results ?? [])[0] as Record<string, string | null> | undefined
+  const firstDays = Object.values(firstRow ?? {}).filter((v): v is string => typeof v === 'string').sort()
+  const firstDay = firstDays[0] ?? null
   const stored = new Map<string, DaySummary>()
   for (const r of (rowsR?.results ?? []) as DaySummaryRow[]) stored.set(r.local_day, rowToSummary(r))
   const dirty = new Set(((dirtyR?.results ?? []) as { local_day: string }[]).map((r) => r.local_day))
