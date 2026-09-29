@@ -1,0 +1,6 @@
+# Local secrets for `wrangler dev` (copy to .dev.vars, which is gitignored). Production uses `wrangler secret put <NAME>`.
+# Generate real tokens with: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+APP_TOKEN=dev-app-token
+SHORTCUT_TOKEN=dev-shortcut-token
+MAC_TOKEN=dev-mac-token
+# USDA_KEY=
