@@ -25,11 +25,14 @@ export interface SummaryResponse {
   first_day: string | null
 }
 
-// One row of scalar subqueries (D1 caps the number of terms in a compound SELECT); the minimum is taken in JS.
+// Earliest day with USER data (never day_summary: viewing a month stores empty rows). One row of scalar subqueries
+// because D1 caps the terms of a compound SELECT; the minimum is taken in JS. Timestamp columns use their UTC date,
+// which is at most one day off and only matters for the cutoff.
 const FIRST_DAY_SQL =
   'SELECT (SELECT MIN(local_day) FROM routine_log) AS a, (SELECT MIN(night_of) FROM sleep) AS b, ' +
   '(SELECT MIN(local_day) FROM food_log) AS c, (SELECT MIN(local_day) FROM workouts) AS d, ' +
-  '(SELECT MIN(local_day) FROM sessions) AS e, (SELECT MIN(local_day) FROM day_summary) AS f'
+  '(SELECT MIN(local_day) FROM sessions) AS e, (SELECT MIN(substr(start_ts, 1, 10)) FROM time_blocks) AS f, ' +
+  '(SELECT MIN(substr(hour_start, 1, 10)) FROM screen_hours) AS g'
 
 /** GET /api/summary?from&to (app) */
 export async function summary(c: RouteContext): Promise<Response> {
@@ -56,7 +59,7 @@ export async function summary(c: RouteContext): Promise<Response> {
   const before = firstDay ? days.filter((d) => d < firstDay) : []
   const plan = planRange(firstDay ? days.filter((d) => d >= firstDay) : days, stored, dirty, today)
   const out = new Map<string, SummaryDay>()
-  for (const d of before) out.set(d, emptySummary(d))
+  for (const d of before) out.set(d, stored.get(d) ?? emptySummary(d)) // a stored row is real data even before first_day
   for (const d of [...plan.final, ...plan.asIs]) out.set(d, stored.get(d) ?? emptySummary(d))
   for (const d of plan.stale) out.set(d, { ...(stored.get(d) ?? emptySummary(d)), stale: true })
   // Live today and the (<= 3) rebuilds run side by side: D1 latency is wall-clock, the work itself is small.
