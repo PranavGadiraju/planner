@@ -54,8 +54,22 @@ describe('POST /api/foods body', () => {
     expect(warnings[0]).toMatch(/imply 290 kcal but 100 kcal/)
   })
   it('takes per100 directly (and keeps the id and source it was given)', () => {
-    const { row } = parseFoodBody({ id: 'abc', name: 'Rice', source: 'usda', source_id: 169756, per100: { kcal_100: 130, protein_100: 2.7, carb_100: 28, fat_100: 0.3 } }, NOW)
+    const { row, givenId } = parseFoodBody({ id: 'abc', name: 'Rice', source: 'usda', source_id: 169756, per100: { kcal_100: 130, protein_100: 2.7, carb_100: 28, fat_100: 0.3 } }, NOW)
     expect(row).toMatchObject({ id: 'abc', source: 'usda', source_id: '169756', kcal_100: 130, fiber_100: null, sugar_100: null, serving_g: null })
+    expect(givenId).toBe(true)
+  })
+  it('with an id (a correction) leaves use_count / last_used_at off the row so the guarded upsert keeps the ranking', () => {
+    const { row, givenId } = parseFoodBody({ id: ' f1 ', name: 'Greek yogurt', per100: { kcal_100: 100, protein_100: 10, carb_100: 3.5, fat_100: 5.3 } }, NOW)
+    expect(givenId).toBe(true)
+    expect(row.id).toBe('f1')
+    expect('use_count' in row).toBe(false)
+    expect('last_used_at' in row).toBe(false)
+    expect(Object.keys(row)).not.toContain('use_count')
+    expect(row.created_at).toBe(NOW.toISOString()) // createFood swaps in the stored created_at when the row exists
+    // Without an id a fresh row starts at zero.
+    const fresh = parseFoodBody({ name: 'Greek yogurt', per100: { kcal_100: 100, protein_100: 10, carb_100: 3.5, fat_100: 5.3 } }, NOW)
+    expect(fresh.givenId).toBe(false)
+    expect(fresh.row).toMatchObject({ use_count: 0, last_used_at: null })
   })
   it('rejects bad bodies with 400s', () => {
     expect(status(() => parseFoodBody(null, NOW))).toMatchObject({ status: 400, message: 'body must be a JSON object' })

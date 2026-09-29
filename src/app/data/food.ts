@@ -6,7 +6,7 @@ import { batch, signal, type Signal } from '@preact/signals'
 import { get, set } from 'idb-keyval'
 import type { Food, FoodLog, Meal, MealItem, Slot } from '@shared/types'
 import { mealTotals, per100FromServing, scalePer100, sumMacros, type Macros, type Per100 } from '@shared/nutrition'
-import { OFF_PRODUCT_URL, candidateFromOFF, inferSlot, type FoodCandidate } from '@shared/lookup'
+import { OFF_PRODUCT_URL, candidateFromOFF, inferSlot, normalizeGtin, type FoodCandidate } from '@shared/lookup'
 import { localDay, localParts } from '@shared/tz'
 import { ApiError, apiGet, hasToken, readCache } from './api'
 import * as outbox from './outbox'
@@ -166,16 +166,36 @@ export function loadLog(day: string): Promise<void> {
   })
 }
 
-// After a flush the server is the truth again: refresh what the batch touched.
-outbox.onFlushed((items) => {
+// Rows enqueued by bumpUse (use_count / last_used_at only). Flushing them changes nothing a list fetch would show, so
+// the onFlushed hook skips the two refetches for them (every log, including the one-tap quick add, sends one). Keyed
+// by table|id|updated_at so a real edit of the same row still refreshes.
+const bumpRows = new Set<string>()
+const BUMP_MAX = 500
+const bumpKey = (table: string, id: unknown, updatedAt: unknown) => `${table}|${String(id)}|${String(updatedAt)}`
+
+/** What a flushed batch makes stale: the lists (unless every foods/meals row was a use bump) and the log days it touched. */
+export function staleAfterFlush(items: readonly { table: string; row: Record<string, unknown> }[]): { lists: boolean; days: string[] } {
   let lists = false
   const days = new Set<string>()
   for (const it of items) {
-    if (it.table === 'foods' || it.table === 'meals' || it.table === 'meal_items') lists = true
-    if (it.table === 'food_log' && typeof it.row['local_day'] === 'string') days.add(it.row['local_day'] as string)
+    if (it.table === 'foods' || it.table === 'meals') {
+      if (!bumpRows.delete(bumpKey(it.table, it.row['id'], it.row['updated_at']))) lists = true
+    } else if (it.table === 'meal_items') lists = true
+    else if (it.table === 'food_log' && typeof it.row['local_day'] === 'string') days.add(it.row['local_day'])
   }
+  return { lists, days: [...days] }
+}
+
+// After a flush the server is the truth again: refresh what the batch touched.
+outbox.onFlushed((items) => {
+  const { lists, days } = staleAfterFlush(items)
   if (lists && listsLoaded.value) void loadLists()
   for (const d of days) if (logStates.has(d)) void loadLog(d)
+})
+// A rejected bump never flushes: drop its tag (key is the row id; for a buried batch it is "N rows" and nothing matches).
+outbox.onReject((table, key) => {
+  if (table !== 'foods' && table !== 'meals') return
+  for (const k of bumpRows) if (k.startsWith(`${table}|${key}|`)) bumpRows.delete(k)
 })
 
 // ---- pure helpers (unit-tested) -----------------------------------------------------------------------
@@ -416,8 +436,32 @@ export function existingFor(c: FoodCandidate, list: readonly Food[]): Food | nul
   return list.find((f) => f.source === c.source && f.source_id === c.source_id && !f.deleted_at) ?? null
 }
 
+/**
+ * The saved food a barcode already maps to, whatever found it: a label, Open Food Facts or CLI food carries the code as
+ * its source_id; a scanned USDA hit carries it in label_json.barcode (its source_id is the fdcId). A second scan of the
+ * code is answered from here, so a food saved once works offline and the label is never asked for twice.
+ */
+export function foodByBarcode(code: string, list: readonly Food[]): Food | null {
+  const want = normalizeGtin(code)
+  if (!want) return null
+  for (const f of list) {
+    if (f.deleted_at) continue
+    if (f.source !== 'usda' && f.source_id && normalizeGtin(f.source_id) === want) return f
+    if (f.label_json && f.label_json.includes('"barcode"')) {
+      try {
+        const b = (JSON.parse(f.label_json) as { barcode?: unknown }).barcode
+        if (typeof b === 'string' && normalizeGtin(b) === want) return f
+      } catch { /* not JSON: nothing to match */ }
+    }
+  }
+  return null
+}
+
 async function bumpUse(table: 'foods' | 'meals', row: Food | Meal, at: string): Promise<void> {
-  await enqueue(table, { ...row, use_count: row.use_count + 1, last_used_at: at, updated_at: at })
+  const next = { ...row, use_count: row.use_count + 1, last_used_at: at, updated_at: at }
+  if (bumpRows.size >= BUMP_MAX) for (const k of bumpRows) { bumpRows.delete(k); break }
+  bumpRows.add(bumpKey(table, next.id, next.updated_at))
+  await enqueue(table, next)
 }
 
 export async function logFood(food: Food, grams: number, slot: Slot, at: Date = new Date(), note: string | null = null): Promise<FoodLog> {
@@ -522,7 +566,10 @@ async function fetchOFF(code: string): Promise<FoodCandidate | null> {
   }
 }
 
-/** Open Food Facts first (direct), then USDA Branded through the Worker; a found code is cached in IndexedDB for good. */
+/**
+ * Open Food Facts first (direct), then USDA Branded through the Worker. A complete hit is cached in IndexedDB for good;
+ * an incomplete one (macros missing, or USDA unreachable) is not, so the next scan tries the chain again.
+ */
 export async function lookupBarcode(code: string): Promise<BarcodeLookup> {
   try {
     const hit = await get<BarcodeLookup>(BARCODE_KEY(code))
@@ -541,7 +588,7 @@ export async function lookupBarcode(code: string): Promise<BarcodeLookup> {
       else result = { candidate: null, source: null, offline: !(err instanceof ApiError) }
     }
   }
-  if (result.candidate) void set(BARCODE_KEY(code), result).catch(() => {})
+  if (result.candidate?.complete) void set(BARCODE_KEY(code), result).catch(() => {})
   return result
 }
 

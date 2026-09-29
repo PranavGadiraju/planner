@@ -29,7 +29,11 @@ interface UsdaState { q: string; type: 'generic' | 'branded'; loading: boolean; 
 export function FoodHome({ focusSearch }: { focusSearch: boolean }) {
   const zone = tz.value
   const todayStr = localToday.value
-  const [day, setDay] = useState(todayStr)
+  // The day shown is today unless the user navigated away, so a session left open across midnight follows the date
+  // (the header, the log poll and the instant a quick add lands on all derive from `day`).
+  const [picked, setPicked] = useState<string | null>(null)
+  const day = picked ?? todayStr
+  const setDay = (d: string) => setPicked(d === todayStr ? null : d)
   const log = logState(day).value
   const entries = log.entries.filter((e) => !e.deleted_at)
   const [sheet, setSheet] = useState<SheetState | null>(null)

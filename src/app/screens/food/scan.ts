@@ -1,8 +1,10 @@
 // Still-photo barcode decoding with the barcode-detector ponyfill (zxing-wasm). Loaded lazily by the Scan panel only,
 // and the .wasm is a self-hosted Vite asset (precached by the service worker) so scanning works with no signal.
-// Never getUserMedia: the photo comes from <input type=file capture=environment>.
+// Never getUserMedia: the photo comes from <input type=file capture=environment>. A UPC-E hit is expanded to the
+// UPC-A it compresses (gtin.ts): the reader returns the 8-digit compressed form, whose check digit is the UPC-A's.
 import { BarcodeDetector, prepareZXingModule } from 'barcode-detector/ponyfill'
 import wasmUrl from 'zxing-wasm/reader/zxing_reader.wasm?url'
+import { scannedGtin } from './gtin'
 
 prepareZXingModule({
   overrides: { locateFile: (path: string, prefix: string) => (path.endsWith('.wasm') ? wasmUrl : prefix + path) },
@@ -39,7 +41,7 @@ export async function decodeBarcode(file: Blob): Promise<string | null> {
       const source: ImageBitmap | HTMLCanvasElement = size === longest ? bitmap : scaled(bitmap, size)
       const found = await getDetector().detect(source)
       const hit = found.find((b) => /^\d{8,14}$/.test(b.rawValue))
-      if (hit) return hit.rawValue
+      if (hit) return scannedGtin(hit.format, hit.rawValue)
     }
     return null
   } finally {

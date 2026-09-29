@@ -5,17 +5,18 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Food, FoodLog } from '@shared/types'
 import type { FoodCandidate } from '@shared/lookup'
-import { atwaterCheck, validGtin, type Per100 } from '@shared/nutrition'
+import { atwaterCheck, type Per100 } from '@shared/nutrition'
 import { SubBar } from '../../components/TopBar'
 import { Icon } from '../../components/Icon'
 import { toast } from '../../components/Toast'
 import { navigate } from '../../router'
 import { tz } from '../../data/store'
 import {
-  EMPTY_LABEL_FORM, SLOT_LABELS, addFood, existingFor, fmtKcal, fmtNum, foodFromCandidate, foods, labelPer100, loadLists, lookupBarcode, searchUSDA, updateFood,
-  type LabelForm, type NewFood,
+  EMPTY_LABEL_FORM, SLOT_LABELS, addFood, existingFor, fmtKcal, fmtNum, foodByBarcode, foodFromCandidate, foods, labelPer100, listsLoaded, loadLists,
+  lookupBarcode, searchUSDA, updateFood, type LabelForm, type NewFood,
 } from '../../data/food'
 import { LogFoodSheet, MacroLine, SourceBadge } from './common'
+import { resolveGtin } from './gtin'
 
 export type AddMode = 'scan' | 'search' | 'label'
 const MODES: { mode: AddMode; label: string }[] = [{ mode: 'scan', label: 'Scan' }, { mode: 'search', label: 'Search' }, { mode: 'label', label: 'Label' }]
@@ -59,14 +60,20 @@ type ScanPhase =
   | { kind: 'looking'; code: string }
   | { kind: 'found'; code: string; candidate: FoodCandidate; source: 'off' | 'usda' }
   | { kind: 'notfound'; code: string; offline: boolean }
+  | { kind: 'saved'; code: string; food: Food }
 
 function ScanPanel({ onLog, onLabel }: { onLog: (f: Food) => void; onLabel: (code: string | null) => void }) {
   const [phase, setPhase] = useState<ScanPhase>({ kind: 'idle' })
   const [manual, setManual] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const lookup = async (code: string) => {
-    if (!validGtin(code)) { setPhase({ kind: 'nocode', reason: `${code} is not a valid EAN/UPC (check digit)` }); return }
+  const lookup = async (raw: string) => {
+    const code = resolveGtin(raw)
+    if (!code) { setPhase({ kind: 'nocode', reason: `${raw} is not a valid EAN/UPC (check digit)` }); return }
+    // A code saved before (by label, OFF or USDA) is answered from the cached list: no network, no second label form.
+    if (!listsLoaded.value) await loadLists()
+    const saved = foodByBarcode(code, foods.value)
+    if (saved) { setPhase({ kind: 'saved', code, food: saved }); onLog(saved); return }
     setPhase({ kind: 'looking', code })
     const r = await lookupBarcode(code)
     if (r.candidate && r.source) setPhase({ kind: 'found', code, candidate: r.candidate, source: r.source })
@@ -101,6 +108,12 @@ function ScanPanel({ onLog, onLabel }: { onLog: (f: Food) => void; onLabel: (cod
         <button type="button" class="btn" disabled={manual.length < 8 || busy} onClick={() => void lookup(manual)}>Look up</button>
       </div>
       {phase.kind === 'nocode' && <div class="banner banner-danger"><span class="grow small">{phase.reason}</span></div>}
+      {phase.kind === 'saved' && (
+        <div class="banner banner-info">
+          <span class="grow small"><strong class="num">{phase.code}</strong> is already saved as <b>{phase.food.name}</b>{phase.food.brand ? ` (${phase.food.brand})` : ''}.</span>
+          <button type="button" class="btn btn-sm btn-primary" onClick={() => onLog(phase.food)}>Log</button>
+        </div>
+      )}
       {phase.kind === 'notfound' && (
         <div class="banner">
           <span class="grow small"><strong>{phase.code}</strong> {phase.offline ? 'could not be looked up (offline?).' : 'is not in Open Food Facts or USDA.'} Type the label instead.</span>
