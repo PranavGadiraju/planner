@@ -74,6 +74,39 @@ describe('validateRow', () => {
     const r = validateRow('settings', { key: 'tz', value: '"UTC"', updated_at: now, extra: undefined })
     expect(r.ok && r.columns).toEqual(['key', 'value', 'updated_at'])
   })
+  it('day-scoped tables must carry their day column so dirty_days can always be marked', () => {
+    // timestamp-derived day columns
+    expect(validateRow('time_blocks', { id: 'b1', end_ts: now, category: 'rest', updated_at: now })).toMatchObject({ ok: false, key: 'b1', reason: 'missing start_ts' })
+    expect(validateRow('time_blocks', { id: 'b1', start_ts: null, updated_at: now, deleted_at: now })).toMatchObject({ ok: false, reason: 'missing start_ts' })
+    expect(validateRow('sleep', { night_of: '2026-09-28', wake_ts: now, updated_at: now })).toMatchObject({ ok: false, reason: 'missing bed_ts' })
+    expect(validateRow('sets', { id: 's1', workout_id: 'w', exercise_id: 'e', set_no: 1, reps: 5, updated_at: now })).toMatchObject({ ok: false, reason: 'missing ts' })
+    // local_day columns that are not part of the primary key
+    expect(validateRow('food_log', { id: 'l1', ts: now, slot: 'lunch', label: 'x', kcal: 1, updated_at: now })).toMatchObject({ ok: false, reason: 'missing local_day' })
+    expect(validateRow('workouts', { id: 'w1', started_at: now, updated_at: now })).toMatchObject({ ok: false, reason: 'missing local_day' })
+    expect(validateRow('sessions', { id: 'x1', project_id: 'p', started_at: now, updated_at: now })).toMatchObject({ ok: false, reason: 'missing local_day' })
+    // a tombstone still needs it
+    expect(validateRow('time_blocks', { id: 'b1', updated_at: now, deleted_at: now })).toMatchObject({ ok: false, reason: 'missing start_ts' })
+    expect(validateRow('time_blocks', { id: 'b1', start_ts: now, updated_at: now, deleted_at: now })).toMatchObject({ ok: true })
+    // and it has to be usable
+    expect(validateRow('time_blocks', { id: 'b1', start_ts: 'yesterday-ish', updated_at: now })).toMatchObject({ ok: false, reason: 'invalid start_ts' })
+    expect(validateRow('food_log', { id: 'l1', local_day: '28/09/2026', updated_at: now })).toMatchObject({ ok: false, reason: 'invalid local_day' })
+    // complete rows pass, and non-day tables are unaffected
+    expect(validateRow('food_log', { id: 'l1', ts: now, local_day: '2026-09-28', slot: 'lunch', label: 'x', kcal: 1, updated_at: now })).toMatchObject({ ok: true })
+    expect(validateRow('sleep', { night_of: '2026-09-28', bed_ts: now, updated_at: now })).toMatchObject({ ok: true })
+    expect(validateRow('foods', { id: 'f', name: 'x', updated_at: now })).toMatchObject({ ok: true })
+  })
+  it('every day-scoped table rejects a row without its day column', () => {
+    for (const [name, spec] of Object.entries(TABLES)) {
+      if (!spec.day) continue
+      const row: Record<string, unknown> = { updated_at: now }
+      for (const pk of spec.pk) if (pk !== spec.day.column) row[pk] = 'k'
+      const r = validateRow(name, row)
+      expect(r.ok, name).toBe(false)
+      if (r.ok) throw new Error('unreachable')
+      // when the day column is the primary key itself the pk check speaks first
+      expect(r.reason, name).toMatch(spec.pk.includes(spec.day.column) ? `missing primary key ${spec.day.column}` : `missing ${spec.day.column}`)
+    }
+  })
   it('upsertFor throws on a registry violation (server bug, not client data)', () => {
     expect(() => upsertFor('sleep', { night_of: '2026-09-28' })).toThrow('missing updated_at')
     expect(upsertFor('sleep', { night_of: '2026-09-28', bed_ts: now, updated_at: now }, false).params).toEqual(['2026-09-28', now, now])

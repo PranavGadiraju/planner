@@ -107,7 +107,16 @@ function scalar(v: unknown): Scalar | undefined {
   return undefined
 }
 
-/** Validate a row against the registry: known table, primary key + updated_at present, only allowed columns, scalar values. */
+/** Whether a day-column value can place the row on a local day: YYYY-MM-DD for 'day' columns, a parseable timestamp for 'ts'. */
+function dayValueOk(kind: 'day' | 'ts', v: unknown): boolean {
+  if (typeof v !== 'string' || !v) return false
+  return kind === 'day' ? /^\d{4}-\d{2}-\d{2}$/.test(v) : !Number.isNaN(new Date(v).getTime())
+}
+
+/**
+ * Validate a row against the registry: known table, primary key + updated_at present, only allowed columns, scalar
+ * values, and for day-scoped tables the day column (so every write can mark dirty_days, tombstones included).
+ */
 export function validateRow(table: string, input: object): RowCheck {
   const row = input as Record<string, unknown> // typed row interfaces (Sleep, RoutineLog...) have no index signature
   const spec = TABLES[table]
@@ -118,6 +127,11 @@ export function validateRow(table: string, input: object): RowCheck {
     if (v === undefined || v === null || v === '') return { ok: false, key, reason: `missing primary key ${c}` }
   }
   if (typeof row['updated_at'] !== 'string' || !row['updated_at']) return { ok: false, key, reason: 'missing updated_at' }
+  if (spec.day) {
+    const v = row[spec.day.column]
+    if (v === undefined || v === null || v === '') return { ok: false, key, reason: `missing ${spec.day.column}` }
+    if (!dayValueOk(spec.day.kind, v)) return { ok: false, key, reason: `invalid ${spec.day.column}` }
+  }
   const columns: string[] = []
   const params: Scalar[] = []
   for (const [col, raw] of Object.entries(row)) {
@@ -136,10 +150,8 @@ export function rowLocalDay(table: string, row: object, tz: string): string | nu
   const day = TABLES[table]?.day
   if (!day) return null
   const v = (row as Record<string, unknown>)[day.column]
-  if (typeof v !== 'string' || !v) return null
-  if (day.kind === 'day') return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null
-  const t = new Date(v)
-  return Number.isNaN(t.getTime()) ? null : localDay(t, tz)
+  if (!dayValueOk(day.kind, v)) return null
+  return day.kind === 'day' ? (v as string) : localDay(v as string, tz)
 }
 
 /** Build a ready-to-bind upsert for a row the server itself produced (throws on a registry violation = programming error). */

@@ -20,4 +20,6 @@ export interface RouteContext {
   role: Role | null
   /** Server time when the request arrived. */
   now: Date
+  /** Values captured by ':name' segments of the matched route path (e.g. { date: '2026-09-28' } for /api/day/:date). */
+  params: Record<string, string>
 }
