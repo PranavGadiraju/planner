@@ -1,5 +1,5 @@
-// Work tab ('#/work[/...]'): running banner, project rows with Start, "+ Manual", today's sessions with notes,
-// weekly bars, and the project sheet. '#/work/start' opens the picker at once (Today's quick action),
+// Work tab ('#/work[/...]'): running banner, project rows with Start, "+ Manual", Mac-derived session suggestions,
+// today's sessions with notes, weekly bars, and the project sheet. '#/work/start' opens the picker at once (Today's quick action),
 // '#/work/manual' the manual sheet, '#/work/p/<id>' a project's changelog.
 import { useEffect, useState } from 'preact/hooks'
 import type { Project } from '@shared/types'
@@ -20,6 +20,7 @@ import { StartSheet, startFlow } from './work/StartSheet'
 import { ManualSheet } from './work/ManualSheet'
 import { ProjectsSheet } from './work/ProjectsSheet'
 import { WeekCard } from './work/WeekCard'
+import { SuggestedCard } from './work/SuggestedCard'
 import { ProjectLog } from './work/ProjectLog'
 import { PlayIcon } from './work/icons'
 
@@ -80,6 +81,7 @@ function WorkHome({ action }: { action: string | null }) {
         )}
         {run && <RunningBanner session={run} onEnd={() => setSheet({ kind: 'end' })} />}
         <ProjectsCard running={run} onStart={(p) => void start(p)} onManual={() => setSheet({ kind: 'manual' })} onManage={() => setSheet({ kind: 'projects' })} />
+        <SuggestedCard />
         <TodayCard sessions={list} onEdit={(s) => setSheet({ kind: 'edit', session: s })} />
         <WeekCard week={week.value} loading={workLoading.value} />
       </main>

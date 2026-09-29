@@ -11,6 +11,7 @@ import { HealthStrip } from '../components/HealthStrip'
 import { RunningWorkout } from '../components/RunningWorkout'
 import { RunningSession } from '../components/RunningSession'
 import { QuickActions } from '../components/QuickActions'
+import { SuggestionCard } from '../components/SuggestionCard'
 import { DayRing } from '../components/DayRing'
 import { Sheet } from '../components/Sheet'
 import { Icon } from '../components/Icon'
@@ -55,6 +56,7 @@ export function Today() {
             <DayRingCard day={day} />
             <RoutineCard p={p} day={day} at={at} onTap={onTap} onLongPress={setEditing} />
             <QuickActions />
+            <SuggestionCard />
             <SleepCard sleep={p.sleep} tz={p.tz} now={at} />
             <CheckinCard checkin={p.checkin} day={day} hour={localHour(at, p.tz)} />
             <RunningStrip p={p} at={at} />

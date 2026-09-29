@@ -1,4 +1,4 @@
-/* Work tab: running banner, project rows, today's sessions, week bars, project changelog. Tokens live in styles.css. */
+/* Work tab: running banner, project rows, suggested (Mac-derived) sessions, today's sessions, week bars, project changelog. Tokens live in styles.css. */
 
 /* ---- running banner ------------------------------------------------------------------------------ */
 .run-card {
@@ -101,3 +101,26 @@ textarea.note { min-height: 64px; resize: vertical; line-height: 1.35; }
 /* ---- Today's running strip ----------------------------------------------------------------------------- */
 .run-inline { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .run-inline .btn-sm { min-height: 34px; }
+
+/* ---- suggested sessions (Mac-derived; Today's card and the Work tab's section) --------------------------- */
+.sg-card { border-color: color-mix(in srgb, var(--cat-mac) 35%, var(--border)); }
+.sg-day { padding: 6px 0 2px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.sg-list { display: flex; flex-direction: column; }
+.sg-list > * + * { border-top: 1px solid var(--border); }
+.sg-row { display: flex; flex-direction: column; gap: 8px; padding: 10px 0 12px; }
+.sg-row:first-child { padding-top: 2px; }
+.sg-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.sg-time { flex: none; font-size: 15px; font-weight: 600; }
+.sg-dur { flex: none; font-size: 13.5px; color: var(--text-2); }
+.sg-apps { flex: 1; min-width: 0; text-align: right; font-size: 12.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sg-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sg-proj { flex: 0 1 auto; min-width: 0; max-width: 46%; min-height: 36px; padding: 0 8px 0 10px; font-size: 13.5px; font-weight: 600; gap: 6px; }
+.sg-proj span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sg-proj svg { flex: none; color: var(--text-3); }
+.sg-proj:disabled { opacity: 1; }
+.sg-proj .pdot { width: 10px; height: 10px; }
+.sg-actions .btn-sm { flex: none; }
+.sg-edit-btn { flex: none; width: 36px; height: 36px; border: 1px solid var(--border-strong); }
+.sg-edit-btn.on { background: var(--surface-2); color: var(--text); }
+.sg-edit { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; padding-top: 2px; }
+.sg-edit .sg-note { grid-column: 1 / -1; }

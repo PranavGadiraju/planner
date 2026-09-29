@@ -415,6 +415,25 @@ export async function addManualSession(project: Project, input: ManualInput): Pr
   })
 }
 
+/**
+ * A finished session over a known ISO span (a Mac-derived suggestion, source 'suggest'; the default 'app' for any
+ * other caller): local_day is the day of the start; an end at or before the start, or a span over 24 h, throws.
+ */
+export async function addSpanSession(project: Pick<Project, 'id' | 'name'>, startIso: string, endIso: string, note: string | null = null, source: Session['source'] = 'app'): Promise<SessionRow> {
+  const start = new Date(startIso).getTime()
+  const end = new Date(endIso).getTime()
+  if (!Number.isFinite(start) || !Number.isFinite(end)) throw new Error('Bad start or end time')
+  if (end <= start) throw new Error('End must be after start')
+  if (end - start > MAX_SESSION_MS) throw new Error('A session cannot be longer than 24 h')
+  const s = new Date(start).toISOString()
+  const e = new Date(end).toISOString()
+  const ts = stamp()
+  return enqueueSession({
+    id: uuid(), project_id: project.id, started_at: s, ended_at: e, local_day: localDay(s, tz.value), duration_s: durationSeconds(s, e),
+    note: note?.trim() || null, source, ended_by: 'user', created_at: ts, updated_at: ts, deleted_at: null, project_name: project.name,
+  })
+}
+
 export interface SessionPatch { project_id?: string; started_at?: string; ended_at?: string | null; note?: string | null }
 
 /** Edit a session's project, times or note; duration_s and local_day follow the times. */
