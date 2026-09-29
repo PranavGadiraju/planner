@@ -64,11 +64,18 @@ async function foodLogDay({ env, url, now }: RouteContext): Promise<Response> {
 
 /** POST /api/foods — Claude Code helper: per-serving or per-100 g numbers -> a per-100 g foods row (+ 4/4/9 warnings). */
 async function createFood(c: RouteContext): Promise<Response> {
-  const { row, warnings } = parseFoodBody(await readJson<unknown>(c.request), c.now)
+  const { row, warnings, givenId } = parseFoodBody(await readJson<unknown>(c.request), c.now)
+  const db = c.env.DB
+  if (givenId) {
+    // Correcting a food by id: keep its creation time. use_count / last_used_at are not on the row, so the SET clause
+    // leaves them alone and the food keeps its place in the most-used ordering.
+    const prev = await db.prepare('SELECT created_at FROM foods WHERE id = ?').bind(row.id).first<{ created_at: string }>()
+    if (prev?.created_at) row.created_at = prev.created_at
+  }
   const u = upsertFor('foods', row) // guarded: a newer row already there (edited in the app) is not reverted
-  await c.env.DB.prepare(u.sql).bind(...u.params).run()
-  const { results } = await c.env.DB.prepare('SELECT * FROM foods WHERE id = ?').bind(row.id).all<Food>()
-  return json({ food: results[0] ?? row, warnings }, 201)
+  const [, sel] = await db.batch([db.prepare(u.sql).bind(...u.params), db.prepare('SELECT * FROM foods WHERE id = ?').bind(row.id)])
+  const food: Food = rows<Food>(sel)[0] ?? { use_count: 0, last_used_at: null, ...row }
+  return json({ food, warnings }, 201)
 }
 
 /** POST /api/food-log — Claude Code helper: {food_id|food_name|meal_id|meal_name, grams|scale, at?, slot?, note?} -> a snapshotted entry. */

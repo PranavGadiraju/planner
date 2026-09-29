@@ -78,7 +78,13 @@ export function atwaterWarning(m: { kcal: number; protein_g: number; carb_g: num
   return `4/4/9 check (${basis}): the macros imply ${a.implied} kcal but ${m.kcal} kcal was given (${a.diff} kcal, ${a.pct}% off)`
 }
 
-export interface ParsedFood { row: Food; warnings: string[] }
+/**
+ * The foods row POST /api/foods upserts. With a caller-supplied id (the documented way to correct a food) use_count and
+ * last_used_at are left out: validateRow skips undefined columns, so the guarded upsert neither resets the ranking of an
+ * existing food nor needs them for a new one (schema defaults 0 / NULL). created_at is carried over by createFood.
+ */
+export type FoodUpsert = Omit<Food, 'use_count' | 'last_used_at'> & Partial<Pick<Food, 'use_count' | 'last_used_at'>>
+export interface ParsedFood { row: FoodUpsert; warnings: string[]; givenId: boolean }
 
 /**
  * {id?, name, brand?, serving_g?, serving_text?, per_serving?, per100?, source?, source_id?, label_json?} -> a foods row.
@@ -89,7 +95,8 @@ export function parseFoodBody(body: unknown, now: Date): ParsedFood {
   const name = typeof body['name'] === 'string' ? body['name'].trim() : ''
   if (!name) throw new HttpError(400, 'name required')
   let id: string = crypto.randomUUID()
-  if (body['id'] !== undefined && body['id'] !== null) {
+  const givenId = body['id'] !== undefined && body['id'] !== null
+  if (givenId) {
     if (typeof body['id'] !== 'string' || !body['id'].trim()) throw new HttpError(400, 'id must be a non-empty string')
     id = body['id'].trim()
   }
@@ -122,14 +129,15 @@ export function parseFoodBody(body: unknown, now: Date): ParsedFood {
   }
 
   const ts = now.toISOString()
-  const row: Food = {
+  const row: FoodUpsert = {
     id, name, brand: optStr(body, 'brand'), source, source_id: optStr(body, 'source_id'),
     kcal_100: per100.kcal_100, protein_100: per100.protein_100, carb_100: per100.carb_100, fat_100: per100.fat_100,
     fiber_100: per100.fiber_100 ?? null, sugar_100: per100.sugar_100 ?? null,
     serving_g, serving_text: optStr(body, 'serving_text'), label_json,
-    use_count: 0, last_used_at: null, created_at: ts, updated_at: ts, deleted_at: null,
+    created_at: ts, updated_at: ts, deleted_at: null,
+    ...(givenId ? {} : { use_count: 0, last_used_at: null }),
   }
-  return { row, warnings }
+  return { row, warnings, givenId }
 }
 
 // ---- POST /api/food-log ----------------------------------------------------------------------------

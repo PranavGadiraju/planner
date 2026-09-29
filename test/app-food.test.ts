@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { Food, FoodLog, Meal, MealItem } from '@shared/types'
 import {
-  buildFoodEntry, buildMealEntry, computeMeal, dayTotals, entryDetail, existingFor, foodFromCandidate, groupBySlot, itemsFromEntries, labelPer100,
-  mergeRows, recomputeEntry, searchLocal, slotAt, topMeals, EMPTY_LABEL_FORM,
+  buildFoodEntry, buildMealEntry, computeMeal, dayTotals, entryDetail, existingFor, foodByBarcode, foodFromCandidate, groupBySlot, itemsFromEntries,
+  labelPer100, mergeRows, recomputeEntry, searchLocal, slotAt, topMeals, EMPTY_LABEL_FORM,
 } from '../src/app/data/food'
+import { expandUpcE, resolveGtin, scannedGtin } from '../src/app/screens/food/gtin'
 import { parseHash } from '../src/app/router'
 
 const TZ = 'America/New_York'
@@ -135,6 +136,50 @@ describe('merging and candidates', () => {
     const saved = food({ id: 's', source: 'off', source_id: '0016000275270' })
     expect(existingFor(cand, [food(), saved])).toBe(saved)
     expect(existingFor({ ...cand, source: 'usda' }, [saved])).toBeNull()
+  })
+  it('finds the saved food for a barcode whatever source saved it, across UPC-A / EAN-13 spellings', () => {
+    const byLabel = food({ id: 'l', source: 'label', source_id: '042100005264' })
+    const byOff = food({ id: 'o', source: 'off', source_id: '0016000275270' })
+    const byUsda = food({ id: 'u', source: 'usda', source_id: '2345678', label_json: JSON.stringify({ barcode: '0041570054161', fetched: {} }) })
+    const byCli = food({ id: 'c', source: 'claude', source_id: '96385074' })
+    const gone = food({ id: 'g', source: 'label', source_id: '4006381333931', deleted_at: T0 })
+    const junk = food({ id: 'j', source: 'label', source_id: null, label_json: '{not json "barcode"' })
+    const list = [food(), byLabel, byOff, byUsda, byCli, gone, junk]
+    expect(foodByBarcode('042100005264', list)).toBe(byLabel)
+    expect(foodByBarcode('0042100005264', list)).toBe(byLabel) // EAN-13 spelling of the UPC-A
+    expect(foodByBarcode('16000275270', list)).toBe(byOff)
+    expect(foodByBarcode('041570054161', list)).toBe(byUsda) // a scanned USDA hit keeps the code in label_json only
+    expect(foodByBarcode('96385074', list)).toBe(byCli)
+    expect(foodByBarcode('4006381333931', list)).toBeNull() // tombstoned
+    expect(foodByBarcode('2345678', list)).toBeNull() // a USDA fdcId is not a barcode
+    expect(foodByBarcode('', list)).toBeNull()
+  })
+})
+
+describe('GTIN helpers for the scanner', () => {
+  it('expands UPC-E (8 digits with the UPC-A check digit, or the bare 6) by its last data digit', () => {
+    expect(expandUpcE('04252614')).toBe('042100005264') // last digit 0-2: XX + d + 0000 + YYY
+    expect(expandUpcE('16543205')).toBe('165000004325') // number system 1
+    expect(expandUpcE('01234531')).toBe('012300000451') // 3: XXX + 00000 + YY
+    expect(expandUpcE('01234543')).toBe('012340000053') // 4: XXXX + 00000 + Y
+    expect(expandUpcE('01234558')).toBe('012345000058') // 5-9: XXXXX + 0000 + d
+    expect(expandUpcE('425261')).toBe('042100005264') // six data digits: check digit computed
+    expect(expandUpcE('96385075')).toBe('96385075') // number system 9 is not UPC-E
+    expect(expandUpcE('0016000275270')).toBe('0016000275270')
+  })
+  it('expands only upc_e detector hits', () => {
+    expect(scannedGtin('upc_e', '04252614')).toBe('042100005264')
+    expect(scannedGtin('ean_8', '96385074')).toBe('96385074')
+    expect(scannedGtin('ean_13', '0016000275270')).toBe('0016000275270')
+  })
+  it('resolves typed or scanned digits to the code to look up', () => {
+    expect(resolveGtin('0016000275270')).toBe('0016000275270')
+    expect(resolveGtin('042100005264')).toBe('042100005264')
+    expect(resolveGtin('96385074')).toBe('96385074') // a valid EAN-8 stays EAN-8
+    expect(resolveGtin('04252614')).toBe('042100005264') // fails as EAN-8, holds as UPC-E
+    expect(resolveGtin('96385075')).toBeNull() // fails both ways
+    expect(resolveGtin('0016000275271')).toBeNull()
+    expect(resolveGtin('12')).toBeNull()
   })
 })
 

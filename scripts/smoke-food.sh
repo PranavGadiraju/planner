@@ -66,6 +66,17 @@ check_js "food log today totals" 200 "d.day === '$TODAY' && d.entries.filter((e)
 check_js "food log explicit day" 200 "d.day === '2026-01-02' && d.entries.length === 0 && d.totals.kcal === 0 && Object.keys(d.by_slot).length === 0" -H "$APP" "$BASE/api/food-log?day=2026-01-02"
 check_js "food log bad day" 400 "d.error === 'day must be YYYY-MM-DD or today'" -H "$APP" "$BASE/api/food-log?day=2026-13-45"
 check_js "foods search finds it with use_count bumped" 200 "d.foods.length === 1 && d.foods[0].name === '$NAME' && d.foods[0].use_count === 3 && d.foods[0].last_used_at" -H "$APP" "$BASE/api/foods?q=yogurt%20$STAMP"
+
+# --- POST /api/foods with the id of an existing food (the documented correction path) rewrites the numbers but keeps
+# use_count / last_used_at / created_at, so the food stays where it was in the most-used ordering
+FOOD_ID="$(jsf "$TMP/log.json" 'd.entry.food_id')"
+curl -sS -o "$TMP/food.json" -w '' -H "$APP" "$BASE/api/foods?q=yogurt%20$STAMP"
+CREATED="$(jsf "$TMP/food.json" 'd.foods[0].created_at')"
+check_js "re-add food by id keeps use_count and created_at" 201 "d.food.id === '$FOOD_ID' && d.food.brand === 'Smoke v2' && d.food.fiber_100 === 1 && d.food.kcal_100 === 97.1 && d.food.use_count === 3 && typeof d.food.last_used_at === 'string' && d.food.created_at === '$CREATED' && d.food.updated_at > '$CREATED' && d.warnings.length === 0" \
+  -X POST -H "$APP" -H "$J" -d "{\"id\":\"$FOOD_ID\",\"name\":\"$NAME\",\"brand\":\"Smoke v2\",\"serving_g\":170,\"per100\":{\"kcal_100\":97.1,\"protein_100\":10,\"carb_100\":3.5,\"fat_100\":5.3,\"fiber_100\":1,\"sugar_100\":3.5}}" "$BASE/api/foods"
+check_js "foods search still ranks it first after the correction" 200 "d.foods.length === 1 && d.foods[0].brand === 'Smoke v2' && d.foods[0].use_count === 3 && d.foods[0].created_at === '$CREATED'" -H "$APP" "$BASE/api/foods?q=yogurt%20$STAMP"
+check_js "add food with a new explicit id starts unused" 201 "d.food.id === 'smoke-food-$STAMP' && d.food.use_count === 0 && d.food.last_used_at === null && typeof d.food.created_at === 'string' && d.food.created_at === d.food.updated_at" \
+  -X POST -H "$APP" -H "$J" -d "{\"id\":\"smoke-food-$STAMP\",\"name\":\"Smoke explicit $STAMP\",\"per100\":{\"kcal_100\":50,\"protein_100\":1,\"carb_100\":10,\"fat_100\":0.5}}" "$BASE/api/foods"
 check_js "foods search by brand, most used first" 200 "d.foods.length >= 2 && d.foods[0].name === '$NAME' && d.foods.every((f) => f.deleted_at === null)" -H "$APP" "$BASE/api/foods?q=smoke"
 check_js "foods LIKE wildcards are literal" 200 "d.foods.length === 0" -H "$APP" "$BASE/api/foods?q=%25%25%25"
 check_js "foods limit" 200 "d.foods.length === 1" -H "$APP" "$BASE/api/foods?limit=1"
@@ -75,7 +86,6 @@ check_js "food log wrong method" 405 "d.error === 'method not allowed'" -X PUT -
 
 # --- a meal written through /api/write, then logged by name through the helper (snapshot = totals x scale)
 NOW="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-FOOD_ID="$(jsf "$TMP/log.json" 'd.entry.food_id')"
 MEAL_ID="smoke-meal-$STAMP"
 check_js "write meal + item" 200 "d.applied === 2 && d.rejected.length === 0" -X POST -H "$APP" -H "$J" -d "{\"mutations\":[{\"table\":\"meals\",\"rows\":[{\"id\":\"$MEAL_ID\",\"name\":\"Smoke bowl $STAMP\",\"total_g\":200,\"kcal\":194.2,\"protein_g\":20,\"carb_g\":7,\"fat_g\":10.6,\"fiber_g\":null,\"sugar_g\":7,\"default_slot\":\"breakfast\",\"use_count\":0,\"last_used_at\":null,\"created_at\":\"$NOW\",\"updated_at\":\"$NOW\",\"deleted_at\":null}]},{\"table\":\"meal_items\",\"rows\":[{\"id\":\"smoke-item-$STAMP\",\"meal_id\":\"$MEAL_ID\",\"food_id\":\"$FOOD_ID\",\"grams\":200,\"position\":0,\"updated_at\":\"$NOW\",\"deleted_at\":null}]}]}" "$BASE/api/write"
 check_js "log meal by name x1.5" 201 "d.entry.meal_id === '$MEAL_ID' && d.entry.scale === 1.5 && d.entry.grams === null && d.entry.kcal === 291.3 && d.entry.protein_g === 30 && d.entry.fiber_g === null && d.entry.sugar_g === 10.5" \
