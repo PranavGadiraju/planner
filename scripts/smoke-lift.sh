@@ -59,8 +59,8 @@ check "GET /api/lift/template?name=push" 200 "d.workout && d.workout.id === '$WI
 check "GET /api/lift/template unknown name" 200 'd.workout === null && d.sets.length === 0 && d.exercises.length === 0' -H "$APP" "$BASE/api/lift/template?name=Nope"
 check "GET /api/exercises/:id/history" 200 "d.exercise.id === '$EID' && d.sessions.length === 1 && d.sessions[0].workout_id === '$WID' && d.sessions[0].best_e1rm === 171 && d.sessions[0].volume === 3240 && d.sessions[0].total_reps === 24 && d.sessions[0].is_pr === true && d.sessions[0].sets.length === 4 && d.sessions[0].top_set.weight === 135" -H "$APP" "$BASE/api/exercises/$EID/history?range=all"
 check "GET history range=1m" 200 'd.range === "1m" && d.sessions.length === 1' -H "$APP" "$BASE/api/exercises/$EID/history?range=1m"
-check "GET /api/lift/last-sets" 200 "d.sets.length === 3 && d.sets.every((s) => s.is_warmup === 0 && s.local_day && s.workout_name === 'Push') && d.best_e1rm === 171" -H "$APP" "$BASE/api/lift/last-sets?exercise_id=$EID"
-check "GET /api/lift/last-sets excluding the workout" 200 'd.sets.length === 0 && d.best_e1rm === null' -H "$APP" "$BASE/api/lift/last-sets?exercise_id=$EID&exclude=$WID"
+check "GET /api/lift/last-sets" 200 "d.sets.length === 3 && d.sets.every((s) => s.is_warmup === 0 && s.local_day && s.workout_name === 'Push') && d.best_e1rm === 171 && d.bests.length === 1 && d.bests[0].workout_id === '$WID' && d.bests[0].best === 171" -H "$APP" "$BASE/api/lift/last-sets?exercise_id=$EID"
+check "GET /api/lift/last-sets excluding the workout" 200 'd.sets.length === 0 && d.best_e1rm === null && d.bests.length === 0' -H "$APP" "$BASE/api/lift/last-sets?exercise_id=$EID&exclude=$WID"
 
 # 4. Errors and roles.
 check "POST /api/sets empty body" 400 'd.error === "exercise (name or id) required"' -X POST -H "$APP" -H "$J" -d '{}' "$BASE/api/sets"
@@ -71,5 +71,27 @@ check "GET history unknown exercise" 404 'd.error === "exercise not found"' -H "
 check "GET last-sets without exercise_id" 400 'd.error === "exercise_id required"' -H "$APP" "$BASE/api/lift/last-sets"
 check "GET /api/exercises with shortcut token" 403 'd.error === "forbidden"' -H "$SC" "$BASE/api/exercises"
 check "POST /api/sets with shortcut token" 403 'd.error === "forbidden"' -X POST -H "$SC" -H "$J" -d '{}' "$BASE/api/sets"
+
+# 5. A second workout with the same exercise: bests[] ranks workouts by their best e1RM (140 x 8 = 177.3 beats 171)
+#    and ?exclude drops one workout from sets, best_e1rm and bests alike.
+check "POST /api/sets new Legs, bench 1x8@140" 201 "d.exercise_id === '$EID' && d.created.workout === true && d.created.exercise === false" \
+  -X POST -H "$APP" -H "$J" -d '{"new_workout":{"name":"Legs"},"exercise":"Bench press","reps":8,"weight":140}' "$BASE/api/sets"
+WID2="$(field 'd.workout_id')"
+check "GET last-sets bests per workout" 200 "d.sets.length === 4 && d.best_e1rm === 177.3 && d.bests.length === 2 && d.bests[0].workout_id === '$WID2' && d.bests[0].best === 177.3 && d.bests[1].workout_id === '$WID' && d.bests[1].best === 171" \
+  -H "$APP" "$BASE/api/lift/last-sets?exercise_id=$EID"
+check "GET last-sets exclude keeps the other workout's best" 200 "d.sets.length === 3 && d.best_e1rm === 171 && d.bests.length === 1 && d.bests[0].workout_id === '$WID'" \
+  -H "$APP" "$BASE/api/lift/last-sets?exercise_id=$EID&exclude=$WID2"
+
+# 6. A tombstoned (merged-away) exercise: history answers 404 like the list hides it, so a stale link cannot edit it.
+check "POST /api/sets creates a throwaway exercise" 201 "d.workout_id === '$WID2' && d.created.exercise === true && d.set_ids.length === 1" \
+  -X POST -H "$APP" -H "$J" -d "{\"workout_id\":\"$WID2\",\"exercise\":\"Smoke merged away\",\"reps\":10,\"weight\":20}" "$BASE/api/sets"
+EID2="$(field 'd.exercise_id')"
+check "GET history of the throwaway exercise" 200 "d.exercise.id === '$EID2' && d.sessions.length === 1" -H "$APP" "$BASE/api/exercises/$EID2/history"
+call -H "$APP" "$BASE/api/exercises"
+LATER="$(node -e 'console.log(new Date(Date.now() + 60000).toISOString())')"
+TOMB="$(field "JSON.stringify({ ...d.exercises.find((e) => e.id === '$EID2'), updated_at: '$LATER', deleted_at: '$LATER' })")"
+check "write the exercise tombstone" 200 'd.applied === 1 && d.rejected.length === 0' -X POST -H "$APP" -H "$J" -d "{\"mutations\":[{\"table\":\"exercises\",\"rows\":[$TOMB]}]}" "$BASE/api/write"
+check "GET history of a tombstoned exercise" 404 'd.error === "exercise not found"' -H "$APP" "$BASE/api/exercises/$EID2/history"
+check "GET /api/exercises hides the tombstone" 200 "!d.exercises.some((e) => e.id === '$EID2') && d.exercises.some((e) => e.id === '$EID')" -H "$APP" "$BASE/api/exercises"
 
 [ "$FAIL" = 0 ]

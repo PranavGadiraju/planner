@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Exercise, SetRow, Workout } from '@shared/types'
 import {
   autoCloseEnd, bestE1rm, findExerciseByName, fmtVolume, fmtWeight, isPR, lastSessionSets, monthLabel, nextSetNo, normName, prefillSet,
-  summaryLine, templateExerciseOrder, templateNames, workoutMinutes, workoutStats,
+  serverBestFor, summaryLine, templateExerciseOrder, templateNames, workoutMinutes, workoutStats, type LastSetsPayload,
 } from '../src/app/data/lift'
 
 const T0 = '2026-09-24T14:00:00.000Z'
@@ -115,6 +115,8 @@ describe('summaries', () => {
     expect(workoutStats(sets)).toEqual({ sets: 3, volume: 2640, exercises: 2 })
     expect(summaryLine(52.4, { sets: 18, volume: 7420, exercises: 6 }, 2, 'lb')).toBe('52 min · 18 sets · 7,420 lb · 2 PRs')
     expect(summaryLine(75, { sets: 1, volume: 0, exercises: 1 }, 0, 'kg')).toBe('1h15 · 1 set · 0 kg')
+    expect(summaryLine(52, null, 0, 'lb')).toBe('52 min') // nothing local or cached: no "0 sets · 0 lb"
+    expect(summaryLine(52, null, 1, 'lb')).toBe('52 min · 1 PR')
     expect(fmtVolume(7420.4, 'lb')).toBe('7,420 lb')
     expect(fmtWeight(62.5)).toBe('62.5')
     expect(fmtWeight(135)).toBe('135')
@@ -130,8 +132,9 @@ describe('summaries', () => {
     expect(autoCloseEnd(w, [])).toBe(at(2))
   })
   it('ghost line: the most recent earlier session, oldest set first, skipping the current workout', () => {
-    const p = {
-      best_e1rm: 171,
+    const p: LastSetsPayload = {
+      best_e1rm: 177.3,
+      bests: [{ workout_id: 'w-cur', best: 177.3 }, { workout_id: 'w-prev', best: 171 }],
       sets: [
         { ...setRow({ set_no: 1, reps: 8, weight: 140, workout_id: 'w-cur', ts: at(100) }), local_day: '2026-09-28', workout_name: 'Push' },
         { ...setRow({ set_no: 3, reps: 7, weight: 135, workout_id: 'w-prev', ts: at(-1000) }), local_day: '2026-09-24', workout_name: 'Push' },
@@ -145,5 +148,11 @@ describe('summaries', () => {
     expect(g?.sets.map((s) => `${s.weight}×${s.reps}`)).toEqual(['135×8', '135×8', '135×7'])
     expect(lastSessionSets(undefined, null)).toBeNull()
     expect(monthLabel('2026-09-24')).toBe('September 2026')
+    // The payload covers every workout (one complete cache entry per exercise); bests[] excludes the running one exactly.
+    expect(serverBestFor(p, 'w-cur')).toBe(171)
+    expect(serverBestFor(p, null)).toBe(177.3)
+    expect(serverBestFor(p, 'w-prev')).toBe(177.3)
+    expect(serverBestFor({ ...p, bests: [{ workout_id: 'w-cur', best: 177.3 }] }, 'w-cur')).toBeNull() // first time outside this workout
+    expect(serverBestFor({ sets: [], best_e1rm: 150 } as unknown as LastSetsPayload, 'w-cur')).toBe(150) // a copy cached by an older build
   })
 })
