@@ -77,6 +77,15 @@ check_js "sessions range covers both" 200 "d.by_project['$PID'] === 8100 && Obje
 check_js "session add without project" 400 "/project/.test(d.error)" -X POST -H "$APP" -H "$J" -d '{"minutes":10}' "$BASE/api/sessions"
 check_js "session add without a span" 400 "/minutes or start\+end/.test(d.error)" -X POST -H "$APP" -H "$J" -d '{"project":"planner"}' "$BASE/api/sessions"
 check_js "session add bad minutes" 400 "/minutes/.test(d.error)" -X POST -H "$APP" -H "$J" -d '{"project":"planner","minutes":0}' "$BASE/api/sessions"
+#    start/end take a zoned ISO instant or a local HH:MM only. `new Date()` alone would read these as 2001-12-01,
+#    UTC midnight, the Worker's UTC (twice) and a rolled-over March 2nd: a typo must not land a session on another day.
+check_js "session add bare-hour start" 400 "/^start must be a zoned ISO timestamp/.test(d.error)" -X POST -H "$APP" -H "$J" -d '{"project":"planner","start":"12","minutes":30}' "$BASE/api/sessions"
+check_js "session add date-only start" 400 "/^start must be a zoned ISO timestamp/.test(d.error)" -X POST -H "$APP" -H "$J" -d '{"project":"planner","start":"2026-09-28","minutes":30}' "$BASE/api/sessions"
+check_js "session add legacy date start" 400 "/^start must be a zoned ISO timestamp/.test(d.error)" -X POST -H "$APP" -H "$J" -d '{"project":"planner","start":"Sep 28 2026 10:00","end":"Sep 28 2026 11:00"}' "$BASE/api/sessions"
+check_js "session add zone-less ISO start" 400 "/^start must be a zoned ISO timestamp/.test(d.error)" -X POST -H "$APP" -H "$J" -d '{"project":"planner","start":"2026-09-28T10:00","minutes":30}' "$BASE/api/sessions"
+check_js "time-blocks impossible date" 400 "/^blocks\\[0\\]\\.end must be a zoned ISO timestamp/.test(d.error)" -X POST -H "$APP" -H "$J" -d '{"blocks":[{"start":"10:00","end":"2026-02-30T11:00:00Z","category":"rest"}]}' "$BASE/api/time-blocks"
+check_js "session add zoned ISO with offset" 201 "d.session.started_at === '2026-01-05T11:00:00.000Z' && d.session.duration_s === 1800 && d.session.local_day === '2026-01-05'" -X POST -H "$APP" -H "$J" -d '{"project":"planner","start":"2026-01-05T06:00:00-05:00","minutes":30,"day":"2026-01-05"}' "$BASE/api/sessions"
+check_js "rejected inputs logged nothing" 200 "d.entries.length === 3 && d.total_s === 9900" -H "$APP" "$BASE/api/projects/$PID/log"
 check_js "sessions bad range" 400 "d.error === 'to must be on or after from'" -H "$APP" "$BASE/api/sessions?from=$TODAY&to=2026-01-01"
 check_js "session add with shortcut token" 403 "d.error === 'forbidden'" -X POST -H "$SC" -H "$J" -d '{"project":"planner","minutes":10}' "$BASE/api/sessions"
 check_js "projects with shortcut token" 403 "d.error === 'forbidden'" -H "$SC" "$BASE/api/projects"

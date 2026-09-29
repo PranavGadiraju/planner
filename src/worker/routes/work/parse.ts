@@ -2,7 +2,7 @@
 // {minutes} | {start, end} | {start|end, minutes}, the time-block helper body, project-name matching and the
 // Mon-Sun week grouping. No D1 here, so vitest covers it in test/worker-work.test.ts.
 import { HttpError, isRecord } from '../../http'
-import { parseDayParam } from '../../router'
+import { isCalendarDay, parseDayParam } from '../../router'
 import { addDays, dayWindow, localDay, localHHMM, zonedToUTC } from '../../../shared/tz'
 import type { BlockCategory } from '../../../shared/types'
 
@@ -18,13 +18,27 @@ export const MAX_RANGE_DAYS = 366
 
 const DAY_MS = 86_400_000
 const HHMM = /^(\d{1,2}):(\d{2})$/
+// Zoned ISO-8601 only: YYYY-MM-DDTHH:MM[:SS[.fff]] followed by Z or an offset. `new Date(s)` alone also swallows
+// V8's legacy forms ('12' -> 2001-12-01, '2026-09-28' -> UTC midnight, 'Sep 28 2026 10:00' and a zone-less
+// 'YYYY-MM-DDTHH:MM' read in the Worker's UTC) and rolls 2026-02-30 or 24:00 over to the next day; none of those
+// is what a typo meant, so they are refused instead of landing a session on the wrong day.
+const ISO_ZONED = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/
 const pad = (n: number) => String(n).padStart(2, '0')
 
 export interface When { at: Date; wall: boolean }
 
-/** 'HH:MM' -> that wall-clock time on `day` in tz (wall: true); anything else must parse as a timestamp. */
+/** A zoned ISO-8601 instant (2026-09-28T10:00:00Z, 2026-09-28T06:00-04:00) on a real calendar day, else null. */
+export function parseIso(s: string): Date | null {
+  const m = ISO_ZONED.exec(s)
+  if (!m || !isCalendarDay(m[1] ?? '') || Number(m[2]) > 23 || Number(m[3]) > 59 || Number(m[4] ?? 0) > 59) return null
+  const d = new Date(s)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+/** 'HH:MM' -> that wall-clock time on `day` in tz (wall: true); anything else must be a zoned ISO instant. */
 export function parseWhen(v: unknown, day: string, tz: string, field: string): When {
-  if (typeof v !== 'string' || !v.trim()) throw new HttpError(400, `${field} must be an ISO timestamp or a local HH:MM`)
+  const bad = () => new HttpError(400, `${field} must be a zoned ISO timestamp (2026-09-28T10:00:00Z) or a local HH:MM`)
+  if (typeof v !== 'string' || !v.trim()) throw bad()
   const s = v.trim()
   const m = HHMM.exec(s)
   if (m) {
@@ -33,8 +47,8 @@ export function parseWhen(v: unknown, day: string, tz: string, field: string): W
     if (h > 23 || mi > 59) throw new HttpError(400, `${field}: ${s} is not a valid time`)
     return { at: zonedToUTC(day, `${pad(h)}:${pad(mi)}`, tz), wall: true }
   }
-  const d = new Date(s)
-  if (Number.isNaN(d.getTime())) throw new HttpError(400, `${field} must be an ISO timestamp or a local HH:MM`)
+  const d = parseIso(s)
+  if (!d) throw bad()
   return { at: d, wall: false }
 }
 
