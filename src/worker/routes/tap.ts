@@ -11,28 +11,60 @@ import type { BedTapResult } from '../../shared/sleep'
 import type { RoutineItem, RoutineLog, Sleep, Source, TapAction, TapResponse } from '../../shared/types'
 
 const SLEEP_HISTORY_SQL = 'SELECT * FROM sleep WHERE deleted_at IS NULL ORDER BY night_of DESC LIMIT 60'
+const TAP_LOG_SQL = 'INSERT INTO tap_log (ts, item, role, result) VALUES (?, ?, ?, ?)'
+const NFC_OK_SQL = "INSERT INTO automation_health (source, last_ok_at) VALUES ('nfc', ?) ON CONFLICT(source) DO UPDATE SET last_ok_at = excluded.last_ok_at"
+const NFC_REACHED_WITH_ERROR_SQL =
+  "INSERT INTO automation_health (source, last_ok_at, last_error_at, last_error) VALUES ('nfc', ?, ?, ?) " +
+  'ON CONFLICT(source) DO UPDATE SET last_ok_at = excluded.last_ok_at, last_error_at = excluded.last_error_at, last_error = excluded.last_error'
+const NFC_ERROR_SQL =
+  "INSERT INTO automation_health (source, last_error_at, last_error) VALUES ('nfc', ?, ?) " +
+  'ON CONFLICT(source) DO UPDATE SET last_error_at = excluded.last_error_at, last_error = excluded.last_error'
+
+interface TapBody { item: string; at: Date }
+
+/** {item, ts?} -> the item slug and the instant the state machines run at. Throws HttpError(400/413) on a malformed body. */
+async function parseTapBody(c: RouteContext, role: 'shortcut' | 'app'): Promise<TapBody> {
+  const body = await readJson<unknown>(c.request)
+  if (!isRecord(body)) throw new HttpError(400, 'body must be a JSON object')
+  const item = typeof body['item'] === 'string' ? body['item'].trim() : ''
+  if (!item) throw new HttpError(400, 'item required')
+  // The shortcut role is always server-timestamped; the app may back-date its own taps.
+  let at = c.now
+  if (role === 'app' && body['ts'] !== undefined) {
+    const t = typeof body['ts'] === 'string' ? new Date(body['ts']) : new Date(NaN)
+    if (Number.isNaN(t.getTime())) throw new HttpError(400, 'ts must be an ISO timestamp')
+    at = t
+  }
+  return { item, at }
+}
 
 export async function tap(c: RouteContext): Promise<Response> {
   const { env, role } = c
   if (role !== 'shortcut' && role !== 'app') throw new HttpError(403, 'forbidden')
-  const body = await readJson<unknown>(c.request)
-  if (!isRecord(body)) throw new HttpError(400, 'body must be a JSON object')
-  const item = typeof body['item'] === 'string' ? body['item'].trim() : ''
-  const key = item.toLowerCase()
+  const db = env.DB
+  // Arrival time stamps tap_log and automation_health (proof the automation fired now); a back-dated `ts` only
+  // moves the routine/sleep state machines.
+  const arrivedIso = c.now.toISOString()
 
-  // The shortcut role is always server-timestamped; the app may back-date its own taps.
-  let now = c.now
-  if (role === 'app' && body['ts'] !== undefined) {
-    const t = typeof body['ts'] === 'string' ? new Date(body['ts']) : new Date(NaN)
-    if (Number.isNaN(t.getTime())) throw new HttpError(400, 'ts must be an ISO timestamp')
-    now = t
+  let parsed: TapBody
+  try {
+    parsed = await parseTapBody(c, role)
+  } catch (e) {
+    // A malformed body still leaves a trace: the sticker "did something", and a broken Shortcut shows up in health.
+    if (e instanceof HttpError) {
+      const writes = [db.prepare(TAP_LOG_SQL).bind(arrivedIso, '(bad body)', role, 'bad_request')]
+      if (role === 'shortcut') writes.push(db.prepare(NFC_ERROR_SQL).bind(arrivedIso, e.message))
+      await db.batch(writes)
+    }
+    throw e
   }
+  const { item, at: now } = parsed
+  const key = item.toLowerCase()
   const tz = env.TZ
   const nowIso = now.toISOString()
   const today = localDay(now, tz)
   const night = nightOf(now, tz)
   const source: Source = role === 'shortcut' ? 'nfc' : 'app'
-  const db = env.DB
 
   const [settingsR, sleepR, itemR, logR, countR] = await db.batch([
     db.prepare(SETTINGS_SQL),
@@ -73,7 +105,7 @@ export async function tap(c: RouteContext): Promise<Response> {
       if (r.action === 'nap_then_bed' && r.nap) {
         upsert('time_blocks', {
           id: crypto.randomUUID(), start_ts: r.nap.start, end_ts: r.nap.end, category: 'sleep', label: 'nap',
-          project_id: null, source: 'app', created_at: nowIso, updated_at: nowIso, deleted_at: null,
+          project_id: null, source: 'app', created_at: arrivedIso, updated_at: arrivedIso, deleted_at: null,
         })
       }
     }
@@ -113,17 +145,14 @@ export async function tap(c: RouteContext): Promise<Response> {
   } else {
     action = 'unknown_item'
     status = 400
-    message = item ? `Unknown item "${item}"` : 'Missing item'
+    message = `Unknown item "${item}"`
   }
 
-  // Every call is logged, including duplicates and rejects; the shortcut role also proves the automation is alive.
-  writes.push(db.prepare('INSERT INTO tap_log (ts, item, role, result) VALUES (?, ?, ?, ?)').bind(nowIso, itemOut || '(none)', role, action))
+  // Every call is logged at its arrival time, including duplicates and rejects; the shortcut role also proves the
+  // automation is alive (an unknown item still reached the server, so last_ok_at moves too).
+  writes.push(db.prepare(TAP_LOG_SQL).bind(arrivedIso, itemOut, role, action))
   if (role === 'shortcut') {
-    writes.push(
-      status === 200
-        ? db.prepare("INSERT INTO automation_health (source, last_ok_at) VALUES ('nfc', ?) ON CONFLICT(source) DO UPDATE SET last_ok_at = excluded.last_ok_at").bind(nowIso)
-        : db.prepare("INSERT INTO automation_health (source, last_ok_at, last_error_at, last_error) VALUES ('nfc', ?, ?, ?) ON CONFLICT(source) DO UPDATE SET last_ok_at = excluded.last_ok_at, last_error_at = excluded.last_error_at, last_error = excluded.last_error").bind(nowIso, nowIso, message),
-    )
+    writes.push(status === 200 ? db.prepare(NFC_OK_SQL).bind(arrivedIso) : db.prepare(NFC_REACHED_WITH_ERROR_SQL).bind(arrivedIso, arrivedIso, message))
   }
   await db.batch(writes)
 
