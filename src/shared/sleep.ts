@@ -31,7 +31,9 @@ export interface BedTapResult {
 /**
  * Nightstand sticker state machine. `existing` is the sleep row for nightOf(now), if any.
  *  - no row, evening/night: insert bed_ts = now
- *  - no row, daytime (10:00-17:59 local): ignored (naps are logged in the app)
+ *  - no row, daytime: a bed tap between 10:00 and 17:59 local with no open row is IGNORED (`bed_daytime_ignored`,
+ *    nothing written). Opening a night from an afternoon tap would file a nonsense night_of / late_min; daytime
+ *    naps are logged in the app (or become a nap via the closed-row rule below when the real bedtime follows).
  *  - open row: < 10 min duplicate; 10 min-3 h ignored (first bedtime stands); >= 3 h => wake
  *  - closed row and local hour >= 18: earlier interval becomes a nap, row restarts at now
  *  - closed row, daytime: wake_duplicate
@@ -81,16 +83,18 @@ export function applyWake(open: Sleep | null, now: Date, source: Sleep['wake_sou
 }
 
 /**
- * Consecutive nights (ending with the most recent row) that were on time (late_min <= grace) and confirmed (wake set),
- * except that an open row for tonight counts if it was on time.
+ * Consecutive nights (ending with the most recent row) that were on time (late_min <= grace) and confirmed (wake set).
+ * An unconfirmed night (wake_ts null) breaks the streak until it is edited, except the row for `tonight`
+ * (nightOf(now, tz)), which may still be open because you are in bed or just got up: it counts if it was on time.
+ * Without `tonight` every row must be confirmed.
  */
-export function bedtimeStreak(rows: Sleep[], grace: number): number {
+export function bedtimeStreak(rows: Sleep[], grace: number, tonight?: string): number {
   const live = rows.filter((r) => !r.deleted_at).sort((a, b) => (a.night_of < b.night_of ? 1 : -1))
   let streak = 0
   let expect: string | null = null
   for (const r of live) {
     if (expect && r.night_of !== expect) break
-    const confirmed = r.wake_ts !== null || streak === 0
+    const confirmed = r.wake_ts !== null || r.night_of === tonight
     if (r.late_min > grace || !confirmed) break
     streak++
     expect = addDays(r.night_of, -1)

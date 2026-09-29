@@ -20,7 +20,8 @@ What it does, in order:
      (cached in ~/.config/planner/app_names.json)
   6. ABORTS without posting when the window yields zero rows
   7. POSTs one JSON body to $PLANNER_URL/api/screentime with the MAC_TOKEN from the login Keychain
-     (`security find-generic-password -s planner-mac-token -w`, fallback ~/.config/planner/mac_token)
+     (`security find-generic-password -s planner-mac-token -w`, fallback ~/.config/planner/mac_token,
+     which must be chmod 600: a group/other-readable token file is refused)
   8. writes the watermark ~/.config/planner/last_run only after a 2xx
   9. always removes the temp dir
 
@@ -349,6 +350,16 @@ def read_token() -> Optional[str]:
             return r.stdout.strip()
     except (OSError, subprocess.SubprocessError) as e:
         log("warning: keychain lookup failed: {}".format(e))
+    # Plaintext fallback: only when the file is private to this user (mode 600); a group/other-readable token file
+    # on a shared Mac is refused with a clear hint rather than silently used.
+    try:
+        st = os.stat(TOKEN_FILE)
+    except OSError:
+        return None
+    if st.st_mode & 0o077:
+        log("error: refusing to read {}: it is readable by group/other (mode {}); run: chmod 600 {}".format(
+            TOKEN_FILE, oct(st.st_mode & 0o777), TOKEN_FILE))
+        return None
     try:
         with open(TOKEN_FILE, "r", encoding="utf-8") as f:
             t = f.read().strip()

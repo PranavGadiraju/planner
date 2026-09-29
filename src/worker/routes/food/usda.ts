@@ -1,5 +1,6 @@
 // USDA FoodData Central client for the Worker (the key never reaches the phone). One POST to /foods/search with a
-// 15 s timeout; 429 is surfaced as such so the app can show "try again in a minute".
+// 15 s timeout; 429 is surfaced as such so the app can show "try again in a minute". The key travels in the
+// X-Api-Key header, never in the URL, so no fetch error, trace or log line can ever carry it.
 import { errorMessage } from '../../http'
 
 export const USDA_SEARCH_URL = 'https://api.nal.usda.gov/fdc/v1/foods/search'
@@ -15,9 +16,9 @@ export async function usdaSearch(key: string, body: Record<string, unknown>, tim
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
-    const res = await fetch(`${USDA_SEARCH_URL}?api_key=${encodeURIComponent(key)}`, {
+    const res = await fetch(USDA_SEARCH_URL, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      headers: { 'content-type': 'application/json', accept: 'application/json', 'x-api-key': key },
       body: JSON.stringify(body),
       signal: ctrl.signal,
     })

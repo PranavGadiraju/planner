@@ -72,7 +72,18 @@ describe('streak', () => {
     expect(bedtimeStreak([row('2026-09-25', 5), row('2026-09-27', 0)], 15)).toBe(1) // gap breaks it
   })
   it('tonight\'s open row counts when on time, but an unconfirmed older night breaks the streak', () => {
-    expect(bedtimeStreak([row('2026-09-26', 0), row('2026-09-27', 0, false)], 15)).toBe(2)
-    expect(bedtimeStreak([row('2026-09-25', 0), row('2026-09-26', 0, false), row('2026-09-27', 0)], 15)).toBe(1)
+    const tonight = '2026-09-27'
+    expect(bedtimeStreak([row('2026-09-26', 0), row('2026-09-27', 0, false)], 15, tonight)).toBe(2)
+    expect(bedtimeStreak([row('2026-09-25', 0), row('2026-09-26', 0, false), row('2026-09-27', 0)], 15, tonight)).toBe(1)
+    // tonight's open row that was late breaks it like any other late night
+    expect(bedtimeStreak([row('2026-09-26', 0), row('2026-09-27', 30, false)], 15, tonight)).toBe(0)
+  })
+  it('an open row is only exempt while it is tonight: a forgotten wake breaks the streak from the next afternoon until edited', () => {
+    const rows = [row('2026-09-25', 0), row('2026-09-26', 0), row('2026-09-27', 0, false)]
+    expect(bedtimeStreak(rows, 15, '2026-09-27')).toBe(3) // 08:00 the next morning: nightOf is still 09-27
+    expect(bedtimeStreak(rows, 15, '2026-09-28')).toBe(0) // 15:00: nightOf moved on, 09-27 is unconfirmed
+    expect(bedtimeStreak(rows, 15)).toBe(0) // no tonight given: every night must be confirmed
+    // an older open row behind a confirmed one is never exempt
+    expect(bedtimeStreak([row('2026-09-26', 0, false), row('2026-09-27', 0)], 15, '2026-09-27')).toBe(1)
   })
 })

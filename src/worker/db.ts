@@ -3,6 +3,7 @@
 import type { Settings } from '../shared/types'
 import { DEFAULT_SETTINGS } from '../shared/types'
 import { localDay } from '../shared/tz'
+import { isCalendarDay, parseIso } from './router'
 
 export type Scalar = string | number | null
 
@@ -107,15 +108,36 @@ function scalar(v: unknown): Scalar | undefined {
   return undefined
 }
 
-/** Whether a day-column value can place the row on a local day: YYYY-MM-DD for 'day' columns, a parseable timestamp for 'ts'. */
+/** Calendar-day columns: a real YYYY-MM-DD (2026-13-45 is refused). */
+const DAY_COLUMNS: ReadonlySet<string> = new Set(['local_day', 'night_of'])
+/** Timestamp columns that do not follow the *_at / *_ts naming (kept for tables the registry may grow into). */
+const TS_COLUMNS: ReadonlySet<string> = new Set(['ts', 'hour_start'])
+
+/** Every column named *_at or *_ts (created_at, started_at, bed_ts, start_ts, last_used_at, archived_at...) plus `ts`. */
+export function isTimestampColumn(col: string): boolean {
+  return TS_COLUMNS.has(col) || /_(at|ts)$/.test(col)
+}
+
+/**
+ * A present timestamp value must be a zoned ISO-8601 instant on a real calendar day (what Date#toISOString writes;
+ * '12', 'zzz', '2026-02-30T00:00Z' and a zone-less '2026-09-28T10:00' are refused). Anything else would sort wrongly
+ * against every real updated_at (the guarded upsert could never touch the row again) or reach buildDay as NaN.
+ */
+function timestampOk(v: unknown): boolean {
+  return typeof v === 'string' && parseIso(v) !== null
+}
+
+/** Whether a day-column value can place the row on a local day: a real YYYY-MM-DD for 'day' columns, a zoned ISO instant for 'ts'. */
 function dayValueOk(kind: 'day' | 'ts', v: unknown): boolean {
   if (typeof v !== 'string' || !v) return false
-  return kind === 'day' ? /^\d{4}-\d{2}-\d{2}$/.test(v) : !Number.isNaN(new Date(v).getTime())
+  return kind === 'day' ? isCalendarDay(v) : timestampOk(v)
 }
 
 /**
  * Validate a row against the registry: known table, primary key + updated_at present, only allowed columns, scalar
- * values, and for day-scoped tables the day column (so every write can mark dirty_days, tombstones included).
+ * values, every present *_at / *_ts / ts column a strict zoned ISO-8601 instant, every present day column
+ * (local_day, night_of) a real calendar day, and for day-scoped tables the day column present (so every write can
+ * mark dirty_days, tombstones included).
  */
 export function validateRow(table: string, input: object): RowCheck {
   const row = input as Record<string, unknown> // typed row interfaces (Sleep, RoutineLog...) have no index signature
@@ -139,6 +161,10 @@ export function validateRow(table: string, input: object): RowCheck {
     if (!spec.columns.includes(col)) return { ok: false, key, reason: `unknown column ${col}` }
     const v = scalar(raw)
     if (v === undefined) return { ok: false, key, reason: `column ${col} must be a string, number, boolean or null` }
+    if (v !== null) {
+      if (isTimestampColumn(col) && !timestampOk(v)) return { ok: false, key, reason: `invalid ${col}` }
+      if (DAY_COLUMNS.has(col) && (typeof v !== 'string' || !isCalendarDay(v))) return { ok: false, key, reason: `invalid ${col}` }
+    }
     columns.push(col)
     params.push(v)
   }

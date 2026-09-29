@@ -102,6 +102,10 @@ check "tap bad JSON (shortcut)"     400 '"error":"invalid JSON"'          -X POS
 check "tap missing item (app)"      400 '"error":"item required"'         -X POST -H "$APP" -H "$J" -d '{}' "$BASE/api/tap"
 check "tap non-object body (app)"   400 '"error":"body must be a JSON object"' -X POST -H "$APP" -H "$J" -d '[1]' "$BASE/api/tap"
 check "tap bad ts (app)"            400 '"error":"ts must be an ISO timestamp"' -X POST -H "$APP" -H "$J" -d '{"item":"run","ts":"yesterday"}' "$BASE/api/tap"
+# item is a slug of at most 64 chars, checked before anything is looked up or stored
+check "tap item too long (app)"     400 '"error":"item invalid"'          -X POST -H "$APP" -H "$J" -d "{\"item\":\"$(printf 'a%.0s' $(seq 1 65))\"}" "$BASE/api/tap"
+check "tap item bad charset (app)"  400 '"error":"item invalid"'          -X POST -H "$APP" -H "$J" -d '{"item":"sho wer;--"}' "$BASE/api/tap"
+check "tap item mixed case ok (app)" 200 '"action":"routine_duplicate"'   -X POST -H "$APP" -H "$J" -d '{"item":"Shower"}' "$BASE/api/tap"
 check "tap run back-dated (app)"    200 '"action":"routine_started"'      -X POST -H "$APP" -H "$J" -d "{\"item\":\"run\",\"ts\":\"$BACKDATED\"}" "$BASE/api/tap"
 if [ "$BACK_MIN" -ge 3 ]; then
   DONE_PAT='"action":"routine_finished".*done · '
@@ -118,6 +122,11 @@ check "write past-day checkin (app)" 200 '"applied":1'                    -X POS
 check "write unknown column"        200 '"applied":0,"rejected":\[\{"table":"foods".*unknown column' -X POST -H "$APP" -H "$J" -d "{\"mutations\":[{\"table\":\"foods\",\"rows\":[{\"id\":\"f1\",\"nope\":1,\"updated_at\":\"$NOW\"}]}]}" "$BASE/api/write"
 check "write block without its day column" 200 '"applied":0,"rejected":\[\{"table":"time_blocks","key":"b1","reason":"missing start_ts"' -X POST -H "$APP" -H "$J" -d "{\"mutations\":[{\"table\":\"time_blocks\",\"rows\":[{\"id\":\"b1\",\"updated_at\":\"$NOW\",\"deleted_at\":\"$NOW\"}]}]}" "$BASE/api/write"
 check "write constraint failure"    200 '"applied":0,"rejected":\[\{"table":"food_log"' -X POST -H "$APP" -H "$J" -d "{\"mutations\":[{\"table\":\"food_log\",\"rows\":[{\"id\":\"l1\",\"ts\":\"$NOW\",\"local_day\":\"2026-09-28\",\"slot\":\"brunch\",\"label\":\"x\",\"kcal\":1,\"created_at\":\"$NOW\",\"updated_at\":\"$NOW\"}]}]}" "$BASE/api/write"
+# timestamps must be zoned ISO-8601 on a real day and day columns real calendar days (else the row could never sync again or lands on 2001-12-01)
+check "write nonsense day"          200 '"applied":0,"rejected":\[\{"table":"checkins","key":"2025-13-45","reason":"invalid local_day"' -X POST -H "$APP" -H "$J" -d '{"mutations":[{"table":"checkins","rows":[{"local_day":"2025-13-45","morning_note":"x","updated_at":"zzz"}]}]}' "$BASE/api/write"
+check "write junk updated_at"       200 '"applied":0,"rejected":\[\{"table":"settings","key":"winddown_min","reason":"invalid updated_at"' -X POST -H "$APP" -H "$J" -d '{"mutations":[{"table":"settings","rows":[{"key":"winddown_min","value":"45","updated_at":"zzz"}]}]}' "$BASE/api/write"
+check "write legacy-form ts"        200 '"applied":0,"rejected":\[\{"table":"sets","key":"s-bad","reason":"invalid ts"' -X POST -H "$APP" -H "$J" -d "{\"mutations\":[{\"table\":\"sets\",\"rows\":[{\"id\":\"s-bad\",\"workout_id\":\"w\",\"exercise_id\":\"e\",\"set_no\":1,\"reps\":5,\"weight\":0,\"is_warmup\":0,\"ts\":\"12\",\"updated_at\":\"$NOW\"}]}]}" "$BASE/api/write"
+check "write zone-less started_at"  200 '"applied":0,"rejected":\[\{"table":"routine_log","key":"2026-01-02[|]journal","reason":"invalid started_at"' -X POST -H "$APP" -H "$J" -d "{\"mutations\":[{\"table\":\"routine_log\",\"rows\":[{\"local_day\":\"2026-01-02\",\"item_id\":\"journal\",\"started_at\":\"2026-01-02T10:00\",\"ended_at\":null,\"source\":\"app\",\"updated_at\":\"$NOW\",\"deleted_at\":null}]}]}" "$BASE/api/write"
 check "write with shortcut token"   403 '"error":"forbidden"'             -X POST -H "$SC" -H "$J" -d '{"mutations":[]}' "$BASE/api/write"
 check_js "today (app)"              200 'd.routine_items[0].id === "shower" && d.health.taps_today >= 7 && d.health.apps_to_triage === 0' -H "$APP" "$BASE/api/today"
 check "settings (app)"              200 '"winddown_min":45.*"weight_unit":"lb"' -H "$APP" "$BASE/api/settings"
@@ -129,7 +138,8 @@ check "automation health (app)"     200 '"source":"nfc","last_ok_at":"20[^"]*","
 DAY_EXPR='[1380, 1440, 1500].includes(d.minutes) && d.is_today === true && d.totals.tracked_s === d.now_min * 60
   && Object.entries(d.totals).filter(([k]) => k !== "tracked_s").reduce((a, [, v]) => a + v, 0) === d.now_min * 60
   && d.blocks.reduce((a, b) => a + b.minutes, 0) === d.now_min
-  && Array.isArray(d.routine_items) && d.routine_items.length >= 5 && d.routine_items.every((i) => i.active === 1) && Array.isArray(d.projects)'
+  && Array.isArray(d.routine_items) && d.routine_items.length >= 5 && d.routine_items.every((i) => i.active === 1) && Array.isArray(d.projects)
+  && Object.keys(d.freshness).sort().join() === "mac_last_hour,mac_last_ok_at,phone_last_hour" && Object.values(d.freshness).every((v) => v === null)'
 if [ "$BACK_MIN" -ge 3 ]; then
   DAY_EXPR="$DAY_EXPR && d.blocks.some((b) => b.source === 'routine')"
 else

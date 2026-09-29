@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  appsSeen, daysTouched, floorHourIso, HEALTH_SQL, DIRTY_SQL, isPseudoApp, MAX_BINDINGS, normIso, parseScreentimeBody, planScreentime,
+  appsSeen, daysTouched, floorHourIso, HEALTH_SQL, DIRTY_SQL, isPseudoApp, MAX_BINDINGS, MAX_HOURS, MAX_INTERVALS, normIso, parseScreentimeBody, planScreentime,
 } from '../src/worker/routes/screentime/payload'
 import { HttpError } from '../src/worker/http'
 
@@ -77,6 +77,18 @@ describe('parseScreentimeBody', () => {
     expect(p.window.from).toBe(FROM)
     expect(p.hours[0]?.hour_start).toBe(FROM)
     expect(p.intervals[0]).toEqual({ start: FROM, end: '2026-09-28T13:01:00.000Z', top_app: null })
+  })
+  it('caps hour rows and intervals at what a 48 h window can really hold (CPU budget)', () => {
+    expect(MAX_HOURS).toBe(3000)
+    expect(MAX_INTERVALS).toBe(2000)
+    const hours = Array.from({ length: MAX_HOURS + 1 }, (_, i) => ({ hour_start: FROM, app_id: `app${i}`, seconds: 1 }))
+    rejects(body({ hours }), 400, /at most 3000 hour rows per request/)
+    const t0 = new Date(FROM).getTime()
+    const intervals = Array.from({ length: MAX_INTERVALS + 1 }, (_, i) => ({
+      start: new Date(t0 + i * 1000).toISOString(), end: new Date(t0 + i * 1000 + 500).toISOString(), top_app: null,
+    }))
+    rejects(body({ intervals }), 400, /at most 2000 intervals per request/)
+    expect(parseScreentimeBody(body({ hours: hours.slice(0, MAX_HOURS), intervals: intervals.slice(0, MAX_INTERVALS) }), 'mac').hours).toHaveLength(MAX_HOURS)
   })
   it('merges duplicate hour rows (clamped) and collapses intervals with the same start', () => {
     const p = parseScreentimeBody(body({

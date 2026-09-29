@@ -113,6 +113,59 @@ describe('screen time placement', () => {
   })
 })
 
+describe('study block apps', () => {
+  const session = (id: string, s: string, e: string): DayInput['sessions'][number] => ({
+    id, project_id: 'p1', project_name: 'planner', started_at: s, ended_at: e, local_day: DAY, duration_s: 0, note: null, source: 'app', ended_by: 'user', created_at: '', updated_at: '', deleted_at: null,
+  })
+  const mac = (hour_start: string, app_id: string, seconds: number): DayInput['screen_hours'][number] => ({ source: 'mac', device: 'mbp', hour_start, app_id, seconds })
+  const hour13 = new Date(local(DAY, '13:00')).toISOString()
+  const study = (r: ReturnType<typeof buildDay>) => r.blocks.filter((b) => b.category === 'study')
+
+  it('pro-rates the hour rows by the share of the hour the block covers and keeps the top 3 by seconds', () => {
+    const inp = base(DAY, NEXT)
+    inp.sessions = [session('s', local(DAY, '13:00'), local(DAY, '13:30'))]
+    inp.screen_hours = [
+      mac(hour13, 'com.microsoft.VSCode', 2700), mac(hour13, 'com.apple.Safari', 1200), mac(hour13, 'com.apple.Terminal', 600), mac(hour13, 'com.apple.Music', 60),
+      { source: 'phone', device: 'iPhone', hour_start: hour13, app_id: '_total', seconds: 1800 }, // phone rows are never Mac apps
+    ]
+    const r = buildDay(inp)
+    expect(study(r)[0]?.apps).toEqual([{ label: 'VS Code', seconds: 1350 }, { label: 'Safari', seconds: 600 }, { label: 'Terminal', seconds: 300 }])
+    expect(r.blocks.filter((b) => b.category !== 'study').every((b) => b.apps === undefined)).toBe(true)
+    expect(r.totals.study_s).toBe(1800) // the chart is untouched: the session still owns its minutes
+  })
+  it('a block over two hours takes each hour by its own share; an hour without rows falls back to the focus intervals', () => {
+    const inp = base(DAY, NEXT)
+    inp.sessions = [session('s', local(DAY, '13:30'), local(DAY, '14:45'))]
+    inp.screen_hours = [mac(hour13, 'com.microsoft.VSCode', 3600)]
+    inp.screen_intervals = [
+      // hour 13 has rows, so this interval only counts for its 14:00-14:10 tail
+      { source: 'mac', device: 'mbp', start_ts: local(DAY, '13:00'), end_ts: local(DAY, '14:10'), top_app: 'com.microsoft.VSCode' },
+      { source: 'mac', device: 'mbp', start_ts: local(DAY, '14:20'), end_ts: local(DAY, '15:00'), top_app: 'com.apple.Safari' },
+    ]
+    const r = buildDay(inp)
+    // hour 13: 3600 x 30/60 = 1800 VS Code; hour 14 from intervals: 600 VS Code + 1500 Safari (clipped at 14:45)
+    expect(study(r)[0]?.apps).toEqual([{ label: 'VS Code', seconds: 2400 }, { label: 'Safari', seconds: 1500 }])
+  })
+  it('apps are attached after the run-length merge, so adjacent sessions stay one block and share one list', () => {
+    const inp = base(DAY, NEXT)
+    inp.sessions = [session('a', local(DAY, '13:00'), local(DAY, '13:30')), session('b', local(DAY, '13:30'), local(DAY, '14:00'))]
+    inp.screen_hours = [mac(hour13, 'com.apple.Safari', 1200)]
+    const r = buildDay(inp)
+    expect(study(r).length).toBe(1)
+    expect(study(r)[0]?.apps).toEqual([{ label: 'Safari', seconds: 1200 }])
+    expect(sumBlocks(r)).toBe(1440)
+  })
+  it('a manual study block gets apps too; without Mac data inside it the field is absent', () => {
+    const inp = base(DAY, NEXT)
+    inp.time_blocks = [{ id: 't', start_ts: local(DAY, '13:00'), end_ts: local(DAY, '13:30'), category: 'study', label: 'Reading', project_id: null, source: 'app', created_at: '', updated_at: '', deleted_at: null }]
+    expect(study(buildDay(inp))[0]?.apps).toBeUndefined()
+    inp.screen_intervals = [{ source: 'mac', device: 'mbp', start_ts: local(DAY, '13:10'), end_ts: local(DAY, '13:40'), top_app: 'com.unknown.app' }]
+    expect(study(buildDay(inp))[0]?.apps).toEqual([{ label: 'app', seconds: 1200 }]) // unlabelled bundle -> short name
+    inp.screen_hours = [{ source: 'mac', device: 'mbp', hour_start: hour13.replace('.000Z', 'Z'), app_id: 'com.apple.Safari', seconds: 3600 }]
+    expect(study(buildDay(inp))[0]?.apps).toEqual([{ label: 'Safari', seconds: 1800 }]) // rows beat intervals, hour key matched by instant
+  })
+})
+
 describe('display', () => {
   it('unknown runs under 5 minutes are absorbed for display but still counted as unknown', () => {
     const inp = base(DAY, NEXT)

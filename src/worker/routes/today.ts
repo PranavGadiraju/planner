@@ -62,7 +62,7 @@ export async function today(c: RouteContext): Promise<Response> {
     settings,
     routine_items: rows<RoutineItem>(itemsR),
     routine_log: rows<RoutineLog>(logR),
-    sleep: { tonight, last_night: last, open, streak: bedtimeStreak(sleepRows, settings.late_grace_min) },
+    sleep: { tonight, last_night: last, open, streak: bedtimeStreak(sleepRows, settings.late_grace_min, night) },
     checkin: one<Checkin>(checkinR),
     running: { workout: one<Workout>(workoutR), session: one<Session & { project_name: string }>(sessionR) },
     health: {

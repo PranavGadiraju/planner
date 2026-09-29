@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildUpsertSql, parseSettings, rowLocalDay, TABLES, TABLE_NAMES, upsertFor, validateRow } from '../src/worker/db'
+import { buildUpsertSql, isTimestampColumn, parseSettings, rowLocalDay, TABLES, TABLE_NAMES, upsertFor, validateRow } from '../src/worker/db'
 import { DEFAULT_SETTINGS } from '@shared/types'
 
 const TZ = 'America/New_York'
@@ -107,6 +107,45 @@ describe('validateRow', () => {
       expect(r.reason, name).toMatch(spec.pk.includes(spec.day.column) ? `missing primary key ${spec.day.column}` : `missing ${spec.day.column}`)
     }
   })
+  it('every *_at / *_ts column must be a zoned ISO-8601 instant on a real day, every day column a real calendar day', () => {
+    const set = { id: 's1', workout_id: 'w', exercise_id: 'e', set_no: 1, reps: 5, weight: 0, is_warmup: 0, updated_at: now }
+    const bad = (table: string, row: object, reason: string) => expect(validateRow(table, row), JSON.stringify(row)).toMatchObject({ ok: false, reason })
+    // what the app writes (Date#toISOString) and the other zoned forms pass
+    expect(validateRow('foods', { id: 'f', name: 'x', created_at: new Date().toISOString(), updated_at: now, last_used_at: null, deleted_at: null })).toMatchObject({ ok: true })
+    expect(validateRow('sets', { ...set, ts: '2026-09-28T06:00-04:00', updated_at: '2026-09-28T10:00:00Z' })).toMatchObject({ ok: true })
+    expect(validateRow('checkins', { local_day: '2026-09-28', morning_at: '2026-09-28T11:05:00.123+02:00', morning_note: 'hi', updated_at: now })).toMatchObject({ ok: true })
+    // the probes from the audit: a nonsense day, junk updated_at (would out-sort every real one), V8's legacy '12'
+    bad('checkins', { local_day: '2025-13-45', updated_at: 'zzz' }, 'invalid local_day')
+    bad('checkins', { local_day: '2026-09-28', updated_at: 'zzz' }, 'invalid updated_at')
+    bad('sets', { ...set, ts: '12' }, 'invalid ts')
+    bad('sets', { ...set, ts: '2026-09-28T10:00' }, 'invalid ts') // zone-less
+    bad('sets', { ...set, ts: '2026-02-30T10:00:00Z' }, 'invalid ts') // not a real day
+    bad('sets', { ...set, ts: '2026-09-28T24:00:00Z' }, 'invalid ts') // rolls over
+    bad('sets', { ...set, ts: 1700000000000 }, 'invalid ts') // epoch numbers are not timestamps here
+    bad('sleep', { night_of: '2026-02-30', bed_ts: now, updated_at: now }, 'invalid night_of')
+    bad('sleep', { night_of: '2026-09-28', bed_ts: now, wake_ts: 'Sep 29 2026 07:00', updated_at: now }, 'invalid wake_ts')
+    bad('routine_log', { local_day: '2026-09-28', item_id: 'run', started_at: 'garbage', updated_at: now }, 'invalid started_at')
+    bad('routine_log', { local_day: '2026-09-28', item_id: 'run', started_at: now, ended_at: 0, updated_at: now }, 'invalid ended_at')
+    bad('workouts', { id: 'w', local_day: '2026-09-28', started_at: now, ended_at: '2026-09-28', updated_at: now }, 'invalid ended_at')
+    bad('sessions', { id: 'x', project_id: 'p', local_day: '2026-9-28', started_at: now, updated_at: now }, 'invalid local_day')
+    bad('projects', { id: 'p', name: 'x', archived_at: 'soon', updated_at: now }, 'invalid archived_at')
+    bad('exercises', { id: 'e', name: 'x', last_used_at: true, updated_at: now }, 'invalid last_used_at')
+    bad('foods', { id: 'f', name: 'x', updated_at: now, deleted_at: 'yesterday' }, 'invalid deleted_at')
+    bad('foods', { id: 'f', name: 'x', created_at: '', updated_at: now }, 'invalid created_at')
+    bad('checkins', { local_day: '2026-09-28', evening_at: '2026-09-28T25:00:00Z', updated_at: now }, 'invalid evening_at')
+    // null stays fine for nullable timestamps
+    expect(validateRow('checkins', { local_day: '2026-09-28', morning_at: null, evening_at: null, updated_at: now })).toMatchObject({ ok: true })
+  })
+  it('isTimestampColumn covers exactly the registry\'s timestamp columns', () => {
+    const cols = new Set<string>()
+    for (const spec of Object.values(TABLES)) for (const c of spec.columns) if (isTimestampColumn(c)) cols.add(c)
+    expect([...cols].sort()).toEqual([
+      'archived_at', 'bed_ts', 'created_at', 'deleted_at', 'end_ts', 'ended_at', 'evening_at', 'last_used_at', 'morning_at',
+      'start_ts', 'started_at', 'ts', 'updated_at', 'wake_ts',
+    ])
+    expect(isTimestampColumn('hour_start')).toBe(true)
+    for (const c of ['fat_100', 'seen_seconds', 'total_g', 'label', 'local_day']) expect(isTimestampColumn(c), c).toBe(false)
+  })
   it('upsertFor throws on a registry violation (server bug, not client data)', () => {
     expect(() => upsertFor('sleep', { night_of: '2026-09-28' })).toThrow('missing updated_at')
     expect(upsertFor('sleep', { night_of: '2026-09-28', bed_ts: now, updated_at: now }, false).params).toEqual(['2026-09-28', now, now])
@@ -123,6 +162,8 @@ describe('rowLocalDay (dirty_days)', () => {
     expect(rowLocalDay('sets', { ts: '2026-01-15T04:59:00.000Z' }, TZ)).toBe('2026-01-14') // 23:59 EST
     expect(rowLocalDay('sleep', { bed_ts: '2026-09-29T03:20:00.000Z' }, TZ)).toBe('2026-09-28')
     expect(rowLocalDay('sets', { ts: 'not a date' }, TZ)).toBeNull()
+    expect(rowLocalDay('sets', { ts: '12' }, TZ)).toBeNull() // never 2001-12-01
+    expect(rowLocalDay('checkins', { local_day: '2025-13-45' }, TZ)).toBeNull()
   })
   it('is null for tables that are not day-scoped', () => {
     expect(rowLocalDay('foods', { id: 'f', created_at: '2026-09-01T00:00:00Z' }, TZ)).toBeNull()
