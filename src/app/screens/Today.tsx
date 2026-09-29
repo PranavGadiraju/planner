@@ -1,5 +1,5 @@
-// Today: routine circles, sleep card, check-in line, health strip. Everything above the fold on 375x812.
-import { useState } from 'preact/hooks'
+// Today: day ring, routine circles, sleep card, check-in line, health strip. Everything above the fold on 375x812.
+import { useEffect, useState } from 'preact/hooks'
 import type { RoutineItem, RoutineLog } from '@shared/types'
 import { localDay, zonedToUTC } from '@shared/tz'
 import { TopBar } from '../components/TopBar'
@@ -7,12 +7,15 @@ import { RoutineCircle } from '../components/RoutineCircle'
 import { SleepCard } from '../components/SleepCard'
 import { CheckinCard } from '../components/CheckinCard'
 import { HealthStrip } from '../components/HealthStrip'
+import { DayRing } from '../components/DayRing'
 import { Sheet } from '../components/Sheet'
 import { Icon } from '../components/Icon'
 import { toast } from '../components/Toast'
 import { navigate } from '../router'
 import { dayLabel, durationLabel, hhmm, localHour } from '../data/format'
 import { editRoutineTimes, loadError, loadToday, loading, now, syncState, tapRoutineLocal, today, undoRoutine } from '../data/store'
+import { dayState, loadDay, watchDay } from '../data/day'
+import { SHORT_LABELS, blockColor, hm, hourDominant, ringSummary, stripSegments } from '../data/daymath'
 import { pending } from '../data/outbox'
 
 export function Today() {
@@ -33,7 +36,7 @@ export function Today() {
 
   return (
     <>
-      <TopBar title={dayLabel(day)} onRefresh={() => void loadToday()} />
+      <TopBar title={dayLabel(day)} onRefresh={() => { void loadToday(); void loadDay(day) }} />
       <main class="content fade">
         <TokenBanner />
         {!p && loading.value && <div class="banner banner-info">Loading today…</div>}
@@ -45,6 +48,7 @@ export function Today() {
         )}
         {p && (
           <>
+            <DayRingCard day={day} />
             <RoutineCard p={p} day={day} at={at} onTap={onTap} onLongPress={setEditing} />
             <SleepCard sleep={p.sleep} tz={p.tz} now={at} />
             <CheckinCard checkin={p.checkin} day={day} hour={localHour(at, p.tz)} />
@@ -77,6 +81,38 @@ function TokenBanner() {
       </span>
       <button type="button" class="btn btn-sm" onClick={() => navigate('#/settings')}>Settings</button>
     </div>
+  )
+}
+
+const EMPTY_HOURS = Array.from({ length: 24 }, () => null)
+
+/** The day ring: 24 hour segments coloured by what mostly happened in them; the whole card opens the Day view. */
+function DayRingCard({ day }: { day: string }) {
+  useEffect(() => { void loadDay(day); return watchDay(day) }, [day])
+  const s = dayState(day).value
+  const d = s.data
+  const hours = d ? hourDominant(d) : EMPTY_HOURS
+  const { known, unknown } = d ? ringSummary(d.totals) : { known: 0, unknown: 0 }
+  const keys = d ? stripSegments(d.totals).filter((x) => x.category !== 'unknown').sort((a, b) => b.minutes - a.minutes).slice(0, 4) : []
+  return (
+    <a class="card ring-card" href="#/day" aria-label={`Day ring: ${hm(known)} tracked, ${hm(unknown)} unknown. Open the day view`}>
+      <div class="ring-row">
+        <DayRing hours={hours} size={150} center={{ big: hm(known), small: 'tracked' }} />
+        <div class="ring-legend">
+          <span class="card-title">Day <Icon name="chevron" size={14} /></span>
+          {keys.map((k) => (
+            <span key={k.category} class="ring-key">
+              <i class="dot" style={`--c:${blockColor(k.category, null)}`} />
+              <span class="grow">{SHORT_LABELS[k.category]}</span>
+              <b class="num">{hm(k.minutes)}</b>
+            </span>
+          ))}
+          {d && keys.length === 0 && <span class="small muted">Nothing tracked yet today.</span>}
+          {!d && <span class="small muted">{s.loading ? 'Loading the day…' : 'No day data yet.'}</span>}
+        </div>
+      </div>
+      <span class="ring-foot small faint num"><i class="dot hatched" /> unknown {hm(unknown)} · tracked {hm(known)}</span>
+    </a>
   )
 }
 

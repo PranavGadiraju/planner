@@ -6,6 +6,7 @@ import { Settings } from './screens/Settings'
 import { ShortcutSetup } from './screens/ShortcutSetup'
 import { TapLog } from './screens/TapLog'
 import { RoutineEditor } from './screens/RoutineEditor'
+import { Day } from './screens/Day'
 import { ComingSoon } from './screens/ComingSoon'
 
 const TAB_ROUTES = new Set(['today', 'food', 'lift', 'work', 'day'])
@@ -16,7 +17,7 @@ function Screen() {
     case 'food': return <ComingSoon title="Food" icon="food" milestone="Milestone 3" blurb="Calories and macros vs targets, one-tap meals, label and barcode entry." />
     case 'lift': return <ComingSoon title="Lift" icon="lift" milestone="Milestone 4" blurb="Push / Pull / Legs templates, one-tap set logging, PRs and progress charts." />
     case 'work': return <ComingSoon title="Work" icon="work" milestone="Milestone 5" blurb="Study and project sessions with what got done, per-project changelog." />
-    case 'day': return <ComingSoon title="Day" icon="day" milestone="Milestone 2" blurb="The 24-hour ribbon: sleep, routine, workouts, Mac screen time and the gaps you can fill." />
+    case 'day': return <Day />
     case 'settings': return <Settings />
     case 'shortcut': return <ShortcutSetup />
     case 'taps': return <TapLog />
