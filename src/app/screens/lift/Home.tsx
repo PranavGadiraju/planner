@@ -148,7 +148,7 @@ function HistoryCard({ list, running }: { list: WorkoutSummary[]; running: Worko
     <section class="card" aria-label="History">
       <div class="card-head">
         <span class="card-title">History</span>
-        <a href="#/lift/exercises" class="small row" style={{ gap: '2px' }}>Exercises <Icon name="chevron" size={14} /></a>
+        <a href="#/lift/exercises" class="small link-row" style={{ gap: '2px' }}>Exercises <Icon name="chevron" size={14} /></a>
       </div>
       {list.length === 0 && !workoutsLoading.value && (
         <p class="lift-empty">No workouts yet.<br />Start one above; it lands here with its sets and volume.</p>

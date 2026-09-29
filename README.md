@@ -9,11 +9,12 @@ backed by **D1 (SQLite)** and one Cron Trigger. No credit card, nothing pauses. 
 `APP_TOKEN` (the app and the CLI), `SHORTCUT_TOKEN` (the NFC Shortcut, may only call `POST /api/tap`) and
 `MAC_TOKEN` (the Mac screen-time script, may only call `POST /api/screentime`).
 
-The full design (schema, API, algorithms, screens, milestones) is in [`docs/plan.md`](docs/plan.md).
-Milestone 1 ships: Worker auth + `/api/health`, `/api/me`, `/api/tap`, `/api/write`, `/api/today`, the tap log,
-automation health, the PWA shell with Today and Settings, the `planner` CLI, and the Mac automation files.
-Milestone 2 adds the day view: `buildDay`, `GET /api/day/:date`, the **Day** tab with its 24-hour timeline and
-gap filling, the Today ring, and `planner day` (see [section 9](#9-milestone-2-day-view)).
+The full design (schema, API, algorithms, screens, milestones) is in [`docs/plan.md`](docs/plan.md). All eight
+milestones are built: the Worker API and NFC taps, the **Day** view with its 24-hour timeline and gap filling
+([section 9](#9-day-view)), the **Food**, **Lift** and **Work** tabs ([section 11](#11-food-lift-and-work-tabs)),
+the hourly Mac screen-time push ([section 4](#4-mac-screen-time-automatic-hourly)), the Week / Month review with
+nightly rollups ([section 10](#10-review--rollups)), barcode scanning, iPhone Screen Time screenshots, Mac-derived
+session suggestions, and the `planner` CLI that Claude Code uses ([section 5](#5-cli-binplanner)).
 
 ---
 
@@ -258,8 +259,8 @@ would give, it falls back to `/app/usage` and says so in the log. Only rows with
 `com.apple.dock` are ignored. Intervals are unioned with a 120 s gap tolerance, unions under 60 s dropped, each
 tagged with its top app. New bundle ids are named with `mdfind` and cached. Roughly 35 rows an hour.
 
-iPhone usage has no automatic source; until the optional Biome decoder stretch (milestone 8) you paste a Screen
-Time screenshot into Claude Code (`/screentime`).
+iPhone usage has no automatic source (the Biome decoder is an optional stretch that is not built): paste a Screen
+Time screenshot into Claude Code (`/screentime`) and it posts the hours with `planner screentime phone`.
 
 ---
 
@@ -278,11 +279,11 @@ token from `PLANNER_TOKEN` or the Keychain item `planner-app-token`. It never pr
 | `planner taps [--json]` | last 100 tap_log rows, newest first |
 | `planner config [--url URL]` | show / set the Worker URL |
 
-Claude Code helpers (all live): `food add --json`, `food search`, `eat`, `session add`, `set add`, `block add`, `screentime phone`, `rollup`, `export`. Run `planner --help` for every flag; `CLAUDE.md` explains when Claude Code uses each one.
-`screentime phone` (M8). `CLAUDE.md` explains how Claude Code uses the CLI and the `/label` and `/screentime`
-recipes.
+Claude Code helpers (all live): `food add --json`, `food search`, `eat`, `session add`, `set add`, `block add`,
+`screentime phone`, `rollup`, `export`. Run `planner --help` for every flag; `CLAUDE.md` explains when Claude Code
+uses each one and holds the `/label` and `/screentime` recipes.
 
-Exit codes: 0 ok, 1 error (cannot reach the Worker, 401/403, server error), 2 usage / not yet available.
+Exit codes: 0 ok, 1 error (cannot reach the Worker, 401/403, server error), 2 usage error.
 
 ---
 
@@ -334,7 +335,7 @@ Exit codes: 0 ok, 1 error (cannot reach the Worker, 401/403, server error), 2 us
 | `POST /api/tap` `{item, ts?}` | shortcut, app | routine start/finish, `bed`, `wake`, `winddown` (tap log only); server-timestamped for the shortcut role; every call logged to `tap_log`, an unknown item is a 400 with `action: unknown_item` |
 | `POST /api/write` `{mutations:[{table, rows}]}` | app | batched idempotent upserts (max 200 rows) guarded by `updated_at`; past days marked dirty |
 | `GET /api/today` | app | routine items + today's log, sleep (tonight, last night, open, streak), check-in, running timers, health |
-| `GET /api/day/:date` | app | (M2) one local day from `buildDay`: `blocks[]`, `gaps[]`, `totals`, `mac_by_category`, `study_by_project`, `manual_by_category`, `markers[]`, `sleep_inferred`, `now_min`, `is_today`, plus `routine_items[]` (active), `projects[]` and the live `time_blocks[]` for the Fill sheet; `:date` is `YYYY-MM-DD` or `today` |
+| `GET /api/day/:date` | app | one local day from `buildDay`: `blocks[]`, `gaps[]`, `totals`, `mac_by_category`, `study_by_project`, `manual_by_category`, `markers[]`, `sleep_inferred`, `now_min`, `is_today`, plus `routine_items[]` (active), `projects[]` and the live `time_blocks[]` for the Fill sheet; `:date` is `YYYY-MM-DD` or `today` |
 | `GET /api/tap/log` | app | last 100 taps |
 | `GET /api/health/automations` | app | automation_health rows |
 | `GET /api/settings` | app | parsed settings (write them through `/api/write`, table `settings`) |
@@ -345,6 +346,7 @@ Exit codes: 0 ok, 1 error (cannot reach the Worker, 401/403, server error), 2 us
 | `POST /api/sets` | app | Claude Code helper: log sets (creates the exercise / workout when asked) |
 | `GET /api/projects`, `GET /api/sessions?from&to`, `GET /api/projects/:id/log`, `GET /api/work/week?day` | app | Work tab: projects, sessions with per-project sums, the per-project changelog, this week vs last week |
 | `POST /api/sessions`, `POST /api/time-blocks` | app | Claude Code helpers: a finished session, blocks that fill gaps in the day chart |
+| `GET /api/work/suggestions?day=` | app | Mac-derived session suggestions for one local day (`YYYY-MM-DD` or `today`): runs of 30 min or more of dev / work apps that no session, workout, manual block or sleep row claims, each with its top 3 apps, plus the projects and the last session's project for the chip. Accepting one writes a finished `sessions` row with `source: 'suggest'` through `/api/write` |
 | `POST /api/screentime` | mac, app | hourly Mac usage (window replace, idempotent) and phone hours from `planner screentime phone` |
 | `GET /api/apps` | app | Mac bundle ids seen, uncategorised first (Settings > Mac apps) |
 | `GET /api/summary?from&to`, `POST /api/rollup`, `POST /api/cron/run`, `GET /api/export` | app | Week/Month review rows (`day_summary`), a manual rebuild, the nightly job on demand, a JSON dump of every table |
@@ -354,25 +356,29 @@ rows.
 
 ---
 
-## 9. Milestone 2: Day view
+## 9. Day view
 
-The **Day** tab (`#/day`) and `planner day <date>` show the same thing: one local day (midnight to midnight in
+The **Day** tab and `planner day <date>` show the same thing: one local day (midnight to midnight in
 `settings.tz`, so 1380 or 1500 minutes on the two DST days) as a vertical timeline of blocks, the per-category
 totals and the list of gaps. It is computed on request by `buildDay` in `src/shared/day.ts` (the Worker's
 `GET /api/day/:date` and the app's optimistic rendering both call it; nothing is stored) in one pass over at most
 1500 minute cells, which keeps it inside the 10 ms CPU budget of the free plan.
 
+**Routes.** `#/day` reopens the view you used last (day, week or month, remembered on the device);
+`#/day/YYYY-MM-DD` opens that day's timeline; `#/day/week[/YYYY-MM-DD]` and `#/day/month[/YYYY-MM-DD]` open the
+week or month containing that date (today when the date is omitted).
+
 **How the timeline is built.** Every minute starts as Unknown. The sources are painted in a fixed order and a
 source may only paint minutes that are still Unknown, so the order is the precedence and no minute is ever counted
 twice: 1 manual `time_blocks` (always win), 2 sleep, 3 workouts, 4 study sessions, 5 routine taps, 6 Mac focus
-intervals (M6), 7 Mac hour totals for hours without intervals (M6), 8 phone hour totals (M8). On today, minutes
+intervals, 7 Mac hour totals for hours without intervals, 8 phone hour totals. On today, minutes
 after now do not exist yet and are not counted; a past day is scored in full. Runs of identical minutes become
 blocks; each block knows its `source` (`manual`, `sleep`, `sleep?`, `workout`, `session`, `routine`, `mac`,
 `mac-hours`, `phone`), which is what `planner day` prints in parentheses.
 
 **What Unknown means.** A minute is Unknown when no source claimed it: you were not in bed, no routine item was
 running, no workout or session was open, and you did not fill it by hand. It is "nothing told the planner",
-not "wasted". Until the Mac push lands (M6) most of a desk day is Unknown, which is expected. Unknown runs
+not "wasted". Until the Mac script is installed (section 4) most of a desk day is Unknown, which is expected. Unknown runs
 shorter than 5 minutes are absorbed into the previous block for display (they still count as Unknown in the
 totals); runs of 5 minutes or more are the **gaps**, drawn hatched and tappable. The Today ring shows
 "tracked / unknown" from the same numbers.
@@ -382,8 +388,8 @@ commute, rest, other, or sleep / workout / study with a project), adjust the sta
 That writes a `time_blocks` row through the outbox (`POST /api/write`), so it works offline and syncs later, and
 the ring and totals update immediately. Because manual blocks are painted first, a block you draw over something
 automatic overrides it; tap any block to see its source and times; blocks you drew by hand can be edited or deleted from that sheet (deletes are
-tombstones, so a wrong fill is one tap to undo). From milestone 3 `planner block add --from --to --category`
-does the same from the CLI.
+tombstones, so a wrong fill is one tap to undo). `planner block add --from --to --category` does the same from
+the CLI.
 
 **Why a routine block uses the default minutes until the second tap.** The first sticker tap only records
 `started_at`. Rather than growing minute by minute or not appearing at all, the block is drawn as
@@ -402,10 +408,11 @@ answer "how did yesterday go" without a screenshot; `--json` gives the raw `buil
 
 ---
 
-## 10. Milestone 7: review + rollups
+## 10. Review + rollups
 
-The **Day** tab now has a **Day | Week | Month** switch at the top (remembered on the device; the route stays
-`#/day[/YYYY-MM-DD]`, and the date in the route anchors the week or month shown).
+The **Day** tab has a **Day | Week | Month** switch at the top. The view is remembered on the device: `#/day`
+reopens the last one, `#/day/YYYY-MM-DD` opens that day's timeline, and `#/day/week[/YYYY-MM-DD]` /
+`#/day/month[/YYYY-MM-DD]` open the week or month containing that date.
 
 **What is stored.** Every past local day gets one `day_summary` row: the eight category totals from `buildDay`
 (the same pass the Day tab draws, so the week adds up to exactly what the days show), `tracked_s`, the
@@ -417,7 +424,7 @@ it live (`live: true`) on every request.
 
 **When rows are rebuilt.** Three paths keep the summaries honest: (1) a `POST /api/write` that touches a past day
 rebuilds that day right after the response (`ctx.waitUntil`) and keeps the `dirty_days` mark as a fallback;
-(2) the nightly cron (`5 8 * * *` UTC = 04:05 New York) rebuilds D-1 and D-2, drains up to 10 `dirty_days`
+(2) the nightly cron (`5 8 * * *` UTC = 04:05 New York) rebuilds D-1 and D-2, drains up to 5 `dirty_days`
 (oldest first), auto-closes workouts and sessions left open for more than 3 h (`ended_by = 'auto'`; a workout ends
 2 min after its last set, a session at start + 3 h), marks days <= D-2 final, prunes `tap_log` to 500 rows and
 writes the `cron` automation_health row (`planner health` shows the last run and its summary); (3)
@@ -454,3 +461,11 @@ range (today live, at most 3 recomputes), the cron, the export and the backgroun
 - **Work**: one-tap Start per project, a running banner on every tab, End with a single "what got done" line, manual
   sessions (25 / 50 / 90 min chips), this week vs last week per project, and a per-project changelog of your notes. The
   evening check-in on Today pre-fills a one-line summary of the day's sessions, workout and routine.
+
+  **Suggested sessions.** When the Mac push shows 30 min or more of dev / work apps (VS Code, Terminal, ...) that no
+  session, workout, manual block or sleep row claims, Today (at most two of today's) and the Work tab's **Suggested**
+  card (today and yesterday, with Edit times) offer "Log 09:10–10:40 as planner?" with a project chip that defaults
+  to the last session's project. **Log** writes a finished `sessions` row with `source: 'suggest'` (badged
+  "suggested" in the Work tab's session list); **Dismiss** hides it on this device for a week. The ranges come from
+  `GET /api/work/suggestions?day=` (section 8), re-fetched on return to the app and after every sync that touches
+  sessions or time blocks. Claude Code sees the same time as `mac` rows outside any session in `planner day`.

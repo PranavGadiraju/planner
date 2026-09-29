@@ -11,7 +11,7 @@ import { navigate } from '../../router'
 import {
   computeMeal, deleteMeal, duplicateMeal, fmtKcal, fmtNum, foodSnapshot, foods, listsLoaded, loadLists, mealItems, meals, saveMeal, searchLocal, type MealItemInput,
 } from '../../data/food'
-import { GramsPad, SlotChips } from './common'
+import { GramsPad, SlotChips, SourceBadge, showSourceInRow } from './common'
 
 export function MealBuilder({ id }: { id: string | null }) {
   const existing = id ? meals.value.find((m) => m.id === id) ?? null : null
@@ -146,6 +146,7 @@ export function MealBuilder({ id }: { id: string | null }) {
                     <span class="result-name">{h.food.name}</span>
                     <span class="result-sub">{h.food.brand ? `${h.food.brand} · ` : ''}{fmtKcal(h.food.kcal_100)} kcal / 100 g</span>
                   </span>
+                  {showSourceInRow(h.food.source) && <SourceBadge source={h.food.source} />}
                   <Icon name="plus" size={18} class="faint" />
                 </button>
               ))}
@@ -171,6 +172,7 @@ function AddItemSheet({ food, onAdd, onClose }: { food: Food; onAdd: (grams: num
   return (
     <Sheet title={food.name} sub={`${food.brand ? `${food.brand} · ` : ''}${fmtKcal(food.kcal_100)} kcal / 100 g`} onClose={onClose}>
       <div class="stack">
+        <div class="sheet-source"><SourceBadge source={food.source} /></div>
         <GramsPad food={food} grams={grams} onChange={setGrams} />
         <button type="button" class="btn btn-primary btn-big btn-block" disabled={!(grams > 0)} onClick={() => onAdd(grams)}><Icon name="plus" size={20} /> Add {grams > 0 ? `${fmtNum(grams)} g` : ''}</button>
       </div>

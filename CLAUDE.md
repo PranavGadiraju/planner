@@ -90,9 +90,11 @@ When the user asks how today is going, run `planner today`. When they ask how ye
 `planner day yesterday` / `planner day YYYY-MM-DD` and answer from its output; never guess. Reading that output:
 
 - `unknown` means no source claimed those minutes (not in bed, no routine tap, no workout/session, nothing
-  filled by hand). It is "nothing told the planner", not "wasted"; before the Mac push (M6) most of a desk day is
-  Unknown. The **Gaps** list is the Unknown runs of 5 min or more; the user fills them by tapping in the Day tab
-  (`planner block add` arrives with M3).
+  filled by hand). It is "nothing told the planner", not "wasted"; until the Mac script is installed (README
+  section 4) most of a desk day is Unknown. The **Gaps** list is the Unknown runs of 5 min or more; the user fills
+  them by tapping the gap in the Day tab or with `planner block add`.
+- `mac` rows (VS Code, Terminal, ...) outside any `(session)` block are dev time the user never logged; the app offers
+  them as "Log 09:10–10:40 as <project>?" on Today and Work. Point the user at them, or offer `planner session add --start --end`.
 - A routine block with `(routine)` and exactly the item's default minutes usually means only the first tap
   happened; the second tap (3+ min later) replaces the default with the real duration.
 - `Sleep? (sleep?)` is an open night drawn as an 8 h guess; the user should set the wake time in the app.

@@ -14,9 +14,9 @@ import { dayLabel } from '../../data/format'
 import { localToday, settings, syncState, tz } from '../../data/store'
 import {
   SLOT_LABELS, addFood, dayTotals, deleteEntry, editEntry, entryDetail, existingFor, fmtKcal, fmtNum, foodFromCandidate, foods, groupBySlot,
-  listsError, listsLoaded, loadLists, loadLog, logMeal, logState, meals, saveAsMeal, searchLocal, searchUSDA, slotAt, topMeals, type SearchHit,
+  listsError, listsLoaded, loadLists, loadLog, logMeal, logState, meals, restoreEntry, saveAsMeal, searchLocal, searchUSDA, slotAt, topMeals, type SearchHit,
 } from '../../data/food'
-import { GramsPad, LogFoodSheet, PortionSheet, SlotChips, atFor, useLongPress } from './common'
+import { GramsPad, LogFoodSheet, PortionSheet, SlotChips, SourceBadge, atFor, showSourceInRow, useLongPress } from './common'
 
 type SheetState =
   | { kind: 'food'; food: Food }
@@ -116,7 +116,7 @@ export function FoodHome({ focusSearch }: { focusSearch: boolean }) {
         <section class="card" aria-label="Quick add">
           <div class="card-head">
             <span class="card-title">Quick add</span>
-            <a href="#/food/meal" class="small">New meal</a>
+            <a href="#/food/meal" class="small link-row">New meal</a>
           </div>
           <QuickGrid meals={topMeals(meals.value, new Date())} onTap={(m) => void quickLog(m)} onLong={(m) => setSheet({ kind: 'meal', meal: m })} />
           {meals.value.length === 0 && (
@@ -156,6 +156,7 @@ export function FoodHome({ focusSearch }: { focusSearch: boolean }) {
                         : `Meal · ${fmtKcal(h.meal.kcal)} kcal · ${fmtNum(h.meal.total_g)} g`}
                     </span>
                   </span>
+                  {h.kind === 'food' && showSourceInRow(h.food.source) && <SourceBadge source={h.food.source} />}
                   <span class={`badge${h.kind === 'meal' ? ' badge-warn' : ''}`}>{h.kind === 'meal' ? 'meal' : `${Math.round(h.food.protein_100)}P`}</span>
                 </button>
               ))}
@@ -383,9 +384,11 @@ function EditEntrySheet({ entry, onClose }: { entry: FoodLog; onClose: () => voi
       onClose()
     } finally { setBusy(false) }
   }
+  // Delete is a tombstone through the outbox; Undo re-queues the same row with deleted_at cleared and a newer
+  // updated_at, so it wins over the tombstone on the server too.
   const del = async () => {
     await deleteEntry(entry)
-    toast(`${entry.label} removed`, { action: { label: 'Undo', fn: () => { void editEntry(entry, {}) } }, duration: 5000 })
+    toast(`${entry.label} removed`, { action: { label: 'Undo', fn: () => { void restoreEntry(entry) } }, duration: 5000 })
     onClose()
   }
   // Per-100 g profile for the live kcal: the cached food, or the entry's own snapshot scaled back to 100 g.
@@ -397,6 +400,7 @@ function EditEntrySheet({ entry, onClose }: { entry: FoodLog; onClose: () => voi
   return (
     <Sheet title={entry.label} sub={`${entryDetail(entry)} · ${SLOT_LABELS[entry.slot]}`} onClose={onClose}>
       <div class="stack">
+        {food && <div class="sheet-source"><SourceBadge source={food.source} /></div>}
         {isFood ? (
           <GramsPad food={per100} grams={amount} onChange={setAmount} />
         ) : (
