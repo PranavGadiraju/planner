@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Project, TodayPayload } from '@shared/types'
 import { DEFAULT_SETTINGS } from '@shared/types'
+import * as outbox from '../src/app/data/outbox'
 import { today } from '../src/app/data/store'
 import {
-  checkinSummary, clockLabel, desiredRunning, durationSeconds, elapsedDays, endSession, groupByWeek, running, secondsLabel, sessionsDay, spanFor,
-  startSession, todaySessions, weekBars, workoutNames, type SessionRow,
+  addManualSession, checkinSummary, clockLabel, desiredRunning, durationSeconds, elapsedDays, endSession, groupByWeek, handleReject, projects, running,
+  secondsLabel, sessionsDay, spanFor, startSession, todaySessions, weekBars, workoutNames, type SessionRow,
 } from '../src/app/data/work'
 import { parseHash } from '../src/app/router'
 
@@ -126,6 +127,63 @@ describe('running session', () => {
     expect(running.value).toBeNull()
     expect(today.value?.running.session).toBeNull()
     expect(todaySessions.value[0]?.duration_s).toBe(5400)
+  })
+  it('ending with a project change sends one row carrying the new project, stamped after the start', async () => {
+    projects.value = [project('p1', 'Planner'), project('p2', 'Thesis', { position: 2 })]
+    today.value = payload(null)
+    const rows: { table: string; row: Record<string, unknown> }[] = []
+    const off = outbox.onEnqueue((table, row) => { rows.push({ table, row }) })
+    try {
+      const r = await startSession(project('p1', 'Planner'), new Date('2026-09-28T17:00:00.000Z'))
+      if (!r.ok) throw new Error('unreachable')
+      const ended = await endSession(r.session, ' moved it ', new Date('2026-09-28T18:00:00.000Z'), { project_id: 'p2' })
+      // the end sheet used to queue an edit row and then an end row: with one updated_at the server kept only the first
+      expect(rows.map((x) => x.table)).toEqual(['sessions', 'sessions'])
+      expect(rows[1]?.row).toMatchObject({ id: r.session.id, project_id: 'p2', ended_at: '2026-09-28T18:00:00.000Z', duration_s: 3600, note: 'moved it', ended_by: 'user' })
+      expect(rows[1]?.row).not.toHaveProperty('project_name')
+      expect(ended.project_name).toBe('Thesis')
+      expect(ended.updated_at > r.session.updated_at).toBe(true)
+      expect(running.value).toBeNull()
+      expect(todaySessions.value.map((s) => [s.id, s.project_id])).toEqual([[r.session.id, 'p2']])
+    } finally { off() }
+  })
+  it('never gives two writes the same updated_at, even inside one millisecond', async () => {
+    const frozen = vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-09-28T18:30:00.000Z').getTime())
+    try {
+      today.value = payload(null)
+      const r = await startSession(project('p1', 'Planner'), new Date('2026-09-28T17:00:00.000Z'))
+      if (!r.ok) throw new Error('unreachable')
+      const ended = await endSession(r.session, '', new Date('2026-09-28T18:00:00.000Z'))
+      expect(ended.updated_at > r.session.updated_at).toBe(true)
+      const manual = await addManualSession(project('p1', 'Planner'), { minutes: 10 })
+      expect(manual.updated_at > ended.updated_at).toBe(true)
+    } finally { frozen.mockRestore() }
+  })
+  it('a start the server rejects stops running and leaves the list (other tables and unknown ids are ignored)', async () => {
+    today.value = payload(null)
+    const r = await startSession(project('p1', 'Planner'), new Date('2026-09-28T17:00:00.000Z'))
+    if (!r.ok) throw new Error('unreachable')
+    expect(running.value?.id).toBe(r.session.id)
+    handleReject('projects', r.session.id) // another table's row: nothing changes here
+    handleReject('time_blocks', r.session.id)
+    expect(running.value?.id).toBe(r.session.id)
+    handleReject('sessions', r.session.id)
+    expect(running.value).toBeNull()
+    expect(today.value?.running.session).toBeNull()
+    expect(todaySessions.value).toEqual([])
+    handleReject('sessions', r.session.id) // already gone: a no-op
+    expect(todaySessions.value).toEqual([])
+  })
+  it('a buried batch ("N rows") drops every pending session, also the local stand-in before Today loads', async () => {
+    today.value = null
+    const r = await startSession(project('p1', 'Planner'), new Date('2026-09-28T17:00:00.000Z'))
+    if (!r.ok) throw new Error('unreachable')
+    const manual = await addManualSession(project('p1', 'Planner'), { minutes: 10, day: DAY }) // the list is pinned to DAY
+    expect(running.value?.id).toBe(r.session.id)
+    expect(todaySessions.value.map((s) => s.id).sort()).toEqual([r.session.id, manual.id].sort())
+    handleReject('sessions', '2 rows')
+    expect(running.value).toBeNull()
+    expect(todaySessions.value).toEqual([])
   })
   it('desiredRunning lets queued rows override the server answer, newest first', () => {
     const server = sess('s1', 'p1', '2026-09-28T17:00:00.000Z', null)

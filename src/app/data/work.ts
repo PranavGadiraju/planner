@@ -10,7 +10,7 @@ import { addDays, dayWindow, localDay, localHHMM, weekStart, zonedToUTC } from '
 import { routineIsDone } from '@shared/routine'
 import { ApiError, apiGet, hasToken, readCache } from './api'
 import * as outbox from './outbox'
-import { localToday, today, tz } from './store'
+import { loadToday, localToday, today, tz } from './store'
 import { durationLabel, uuid } from './format'
 
 export type SessionRow = Session & { project_name: string }
@@ -261,6 +261,38 @@ outbox.onEnqueue((table, row) => {
   else if (table === 'projects') applyProjectRow(row as unknown as Project)
 })
 
+/**
+ * The server refused a queued row (a project it does not know yet, a validation failure): the outbox dropped it, so
+ * it must stop being replayed over server answers and the screens go back to what the server holds. `key` is the
+ * row id, or "N rows" when a whole batch was buried (then every pending row of that table is gone). main.tsx
+ * already toasts the reason. Exported for the unit tests; wired below.
+ */
+export function handleReject(table: string, key: string): void {
+  if (table === 'sessions') {
+    const ids = pendingSessions.has(key) ? [key] : [...pendingSessions.keys()]
+    if (ids.length === 0) return
+    const gone = new Set(ids)
+    batch(() => {
+      for (const id of ids) pendingSessions.delete(id)
+      const p = today.value
+      if (p && p.running.session && gone.has(p.running.session.id)) today.value = { ...p, running: { ...p.running, session: null } }
+      if (runningLocal.value && gone.has(runningLocal.value.id)) runningLocal.value = null
+      todaySessions.value = todaySessions.value.filter((s) => !gone.has(s.id))
+      reconcileRunning()
+      patchWeekFromToday()
+    })
+    void loadToday()
+    void loadTodaySessions()
+    void loadWeek()
+  } else if (table === 'projects') {
+    const ids = pendingProjects.has(key) ? [key] : [...pendingProjects.keys()]
+    if (ids.length === 0) return
+    for (const id of ids) pendingProjects.delete(id)
+    void loadProjects()
+  }
+}
+outbox.onReject((table, key) => handleReject(table, key))
+
 outbox.onFlushed((items) => {
   let sessionsTouched = false
   let projectsTouched = false
@@ -307,7 +339,13 @@ void outbox.peek().then((items) => {
 
 // ---- write helpers --------------------------------------------------------------------------------------
 
-const stamp = () => new Date().toISOString()
+// Strictly increasing, so two rows of the same id queued in one millisecond (an end right after an edit, say) never
+// share an updated_at: the Worker's guard is `excluded.updated_at > sessions.updated_at` and would drop the second.
+let lastStamp = 0
+function stamp(): string {
+  lastStamp = Math.max(Date.now(), lastStamp + 1)
+  return new Date(lastStamp).toISOString()
+}
 
 async function enqueueSession(row: Session | SessionRow): Promise<SessionRow> {
   const named = withName(row) // records the name hint before the hook needs it
@@ -349,13 +387,17 @@ export async function startSession(project: Project, at: Date = new Date()): Pro
   return { ok: true, session: await enqueueSession(row) }
 }
 
-/** End a session with its note; `endedAt` defaults to now and is never before the start. */
-export async function endSession(session: Session, note: string, endedAt: Date = new Date()): Promise<SessionRow> {
+/**
+ * End a session with its note; `endedAt` defaults to now and is never before the start. A project change made in
+ * the end sheet travels in the same row (`patch`): one row per end, so the Worker's updated_at guard can never
+ * drop the end behind an edit of the same session.
+ */
+export async function endSession(session: Session, note: string, endedAt: Date = new Date(), patch: Pick<SessionPatch, 'project_id'> = {}): Promise<SessionRow> {
   const start = new Date(session.started_at).getTime()
   const end = Math.max(start, Math.min(endedAt.getTime(), start + MAX_SESSION_MS))
   const endIso = new Date(end).toISOString()
   return enqueueSession({
-    ...dbRow(session), ended_at: endIso, duration_s: durationSeconds(session.started_at, endIso), note: note.trim() || null,
+    ...dbRow(session), ...patch, ended_at: endIso, duration_s: durationSeconds(session.started_at, endIso), note: note.trim() || null,
     ended_by: 'user', updated_at: stamp(), deleted_at: null,
   })
 }

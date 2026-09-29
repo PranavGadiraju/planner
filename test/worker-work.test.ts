@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { HttpError } from '../src/worker/http'
 import {
-  BLOCK_CATEGORIES, daysBetween, groupWeek, matchProject, parseBlocksBody, parseDay, parseRange, parseSessionBody, parseWhen, resolveSpan,
+  BLOCK_CATEGORIES, daysBetween, groupWeek, matchProject, parseBlocksBody, parseDay, parseIso, parseRange, parseSessionBody, parseWhen, resolveSpan,
 } from '../src/worker/routes/work/parse'
 
 const TZ = 'America/New_York'
@@ -47,6 +47,26 @@ describe('parseWhen', () => {
     expect(message(() => parseWhen('noon', DAY, TZ, 'end'))).toContain('end')
     expect(status(() => parseWhen(915, DAY, TZ, 'start'))).toBe(400)
     expect(status(() => parseWhen('', DAY, TZ, 'start'))).toBe(400)
+  })
+  it("refuses what V8's Date would silently accept: a bare hour, a date, legacy and zone-less forms", () => {
+    // new Date() reads these as 2001-12-01, UTC midnight, the Worker's UTC, the Worker's UTC and 2001 again
+    for (const s of ['12', '2026-09-28', 'Sep 28 2026 10:00', '2026-09-28T10:00', '2026-09-28 10:00:00Z', '1790589600000']) {
+      expect(status(() => parseWhen(s, DAY, TZ, 'start')), s).toBe(400)
+      expect(message(() => parseWhen(s, DAY, TZ, 'start')), s).toMatch(/^start must be a zoned ISO timestamp/)
+      expect(parseIso(s), s).toBeNull()
+    }
+    // real calendar days and clock ranges only: V8 rolls these over to the next day instead of failing
+    for (const s of ['2026-02-30T10:00:00Z', '2026-13-01T10:00:00Z', '2026-09-28T24:00:00Z', '2026-09-28T10:60:00Z', '2026-09-28T10:00:60Z']) {
+      expect(status(() => parseWhen(s, DAY, TZ, 'end')), s).toBe(400)
+      expect(message(() => parseWhen(s, DAY, TZ, 'end')), s).toMatch(/^end must be/)
+    }
+  })
+  it('accepts every zoned ISO shape, trimmed', () => {
+    expect(parseWhen('2026-09-28T10:00Z', DAY, TZ, 'start').at.toISOString()).toBe('2026-09-28T10:00:00.000Z')
+    expect(parseWhen('2026-09-28T10:00:00+0400', DAY, TZ, 'start').at.toISOString()).toBe('2026-09-28T06:00:00.000Z')
+    expect(parseWhen('2026-09-28T10:00:00.250+04:00', DAY, TZ, 'start').at.toISOString()).toBe('2026-09-28T06:00:00.250Z')
+    expect(parseWhen(' 2026-09-28T10:00:00Z ', DAY, TZ, 'start')).toEqual({ at: new Date('2026-09-28T10:00:00.000Z'), wall: false })
+    expect(parseIso('2026-02-28T23:59:59Z')?.toISOString()).toBe('2026-02-28T23:59:59.000Z')
   })
 })
 
@@ -142,6 +162,10 @@ describe('parseSessionBody', () => {
     expect(status(() => parseSessionBody({ project: 'p', minutes: 10, note: 42 }, NOW, TZ))).toBe(400)
     expect(status(() => parseSessionBody({ project: 'p', minutes: 10, note: 'x'.repeat(2001) }, NOW, TZ))).toBe(400)
     expect(status(() => parseSessionBody({ project: 'p', minutes: 10, day: '2026-02-30' }, NOW, TZ))).toBe(400)
+    // a bare hour is not a start (V8 would make it 2001-12-01 and mark a dirty day for it)
+    expect(status(() => parseSessionBody({ project: 'p', start: '12', minutes: 30 }, NOW, TZ))).toBe(400)
+    expect(message(() => parseSessionBody({ project: 'p', start: '12', minutes: 30 }, NOW, TZ))).toMatch(/^start must be/)
+    expect(status(() => parseSessionBody({ project: 'p', start: '2026-09-28', end: '2026-09-28T12:00:00Z' }, NOW, TZ))).toBe(400)
   })
 })
 
@@ -168,6 +192,7 @@ describe('parseBlocksBody', () => {
     expect(message(() => parseBlocksBody({ blocks: [{ start: '09:00', end: '10:00', category: 'gaming' }] }, NOW, TZ))).toContain('blocks[0].category')
     expect(status(() => parseBlocksBody({ blocks: [{ start: '2026-09-28T10:00:00Z', end: '2026-09-28T09:00:00Z', category: 'rest' }] }, NOW, TZ))).toBe(400)
     expect(status(() => parseBlocksBody({ blocks: [{ start: '09:00', end: '10:00', category: 'rest', project: 7 }] }, NOW, TZ))).toBe(400)
+    expect(message(() => parseBlocksBody({ blocks: [{ start: '10:00', end: 'Sep 28 2026 11:00', category: 'rest' }] }, NOW, TZ))).toMatch(/^blocks\[0\]\.end must be a zoned ISO/)
     expect(status(() => parseBlocksBody({ blocks: Array.from({ length: 201 }, () => ({ start: '09:00', end: '10:00', category: 'rest' })) }, NOW, TZ))).toBe(400)
     expect(BLOCK_CATEGORIES).toHaveLength(11)
   })

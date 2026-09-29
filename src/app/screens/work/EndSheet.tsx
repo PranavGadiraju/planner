@@ -8,7 +8,7 @@ import { toast } from '../../components/Toast'
 import { hhmm } from '../../data/format'
 import { tz } from '../../data/store'
 import {
-  activeProjects, deleteSession, editSession, elapsedSeconds, endSession, loadProjects, projectById, projectColor, projects, secondsLabel,
+  activeProjects, deleteSession, elapsedSeconds, endSession, loadProjects, projectById, projectColor, projects, secondsLabel,
   type SessionRow,
 } from '../../data/work'
 
@@ -33,8 +33,8 @@ export function EndSheet({ session, onClose }: { session: SessionRow; onClose: (
     if (!endAt) { toast('Duration must be 1–1440 minutes', { kind: 'danger' }); return }
     setBusy(true)
     try {
-      const base = projectId !== session.project_id ? await editSession(session, { project_id: projectId }) : session
-      await endSession(base, note, endAt)
+      // One row: a project change rides in the end row, so the server can never keep the edit and drop the end.
+      await endSession(session, note, endAt, projectId !== session.project_id ? { project_id: projectId } : {})
       toast(`${current?.name ?? session.project_name} · ${secondsLabel(Math.round(min) * 60)}${note.trim() ? ' · noted' : ''}`)
       onClose()
     } finally { setBusy(false) }
