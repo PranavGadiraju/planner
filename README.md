@@ -41,7 +41,7 @@ openssl rand -base64 32      # run this once per token and keep the values in yo
 npx wrangler secret put APP_TOKEN
 npx wrangler secret put SHORTCUT_TOKEN
 npx wrangler secret put MAC_TOKEN
-npx wrangler secret put USDA_KEY   # free key from https://fdc.nal.usda.gov/api-key-signup (used from milestone 3; any placeholder works until then)
+npx wrangler secret put USDA_KEY   # free key from https://fdc.nal.usda.gov/api-key-signup (used by the Food tab's USDA search; any placeholder works until then)
 
 # 5. build and deploy
 npm run deploy
@@ -189,8 +189,7 @@ them to `/api/screentime` with `MAC_TOKEN`. It aborts without posting when the w
 watermark (`~/.config/planner/last_run`) after a 2xx, and re-sends a 3 h overlap each run so late-written rows
 are picked up (the Worker replaces the window, so re-sends never duplicate).
 
-> `/api/screentime` lands in milestone 6. Until then the agent logs `-> 404` every hour and keeps its watermark;
-> that is expected. Install it now anyway so Full Disk Access is settled.
+> Every hour the agent posts the last hours to `/api/screentime`; a failure is logged and the watermark stays put so the next run re-sends the window.
 
 ### Install
 
@@ -279,8 +278,7 @@ token from `PLANNER_TOKEN` or the Keychain item `planner-app-token`. It never pr
 | `planner taps [--json]` | last 100 tap_log rows, newest first |
 | `planner config [--url URL]` | show / set the Worker URL |
 
-Later milestones (stubs that print "not available until milestone N" and exit 2 today): `food add --json`,
-`food search`, `eat`, `block add` (M3); `session add`, `set add` (M5); `rollup`, `export` (M7);
+Claude Code helpers (all live): `food add --json`, `food search`, `eat`, `session add`, `set add`, `block add`, `screentime phone`, `rollup`, `export`. Run `planner --help` for every flag; `CLAUDE.md` explains when Claude Code uses each one.
 `screentime phone` (M8). `CLAUDE.md` explains how Claude Code uses the CLI and the `/label` and `/screentime`
 recipes.
 
@@ -300,7 +298,7 @@ Exit codes: 0 ok, 1 error (cannot reach the Worker, 401/403, server error), 2 us
   and `.err`) or directly (`sh mac/backup.sh`).
 - **Restore** into a fresh database: `npx wrangler d1 execute planner --remote --file ~/planner-backups/<date>.sql`.
 - **D1 Time Travel** keeps 7 days of point-in-time restore: `npx wrangler d1 time-travel restore planner --timestamp <ISO>`.
-- **JSON export** (`GET /api/export`, `planner export`) arrives with milestone 7.
+- **JSON export**: `planner export` writes `GET /api/export` to `~/planner-backups/export-<date>.json`.
 - The repo itself (code, schema) lives on GitHub as a private repo.
 
 ---
@@ -312,7 +310,7 @@ Exit codes: 0 ok, 1 error (cannot reach the Worker, 401/403, server error), 2 us
 | `planner: cannot reach ...: ECONNREFUSED` or `ENOTFOUND` | wrong URL or the Worker is not deployed; `planner config` shows the URL, `curl <url>/api/health` should answer |
 | `401` from the app, CLI or Shortcut | the token does not match the Worker secret; re-paste it (Settings, Keychain `planner-app-token`, or the Shortcut header). Secrets set with `wrangler secret put` take effect on the next request |
 | `403` | right token, wrong route: the Shortcut token may only call `/api/tap`, the Mac token only `/api/screentime` |
-| `404` from the Mac script | `/api/screentime` is not deployed yet (milestone 6) or the URL in the plist is wrong (`PLANNER_URL` should be the site root, without `/api/...`) |
+| `404` from the Mac script | the URL in the plist is wrong (`PLANNER_URL` should be the site root, without `/api/...`) |
 | "Planner failed: shower" notification on the phone | the Worker did not answer `ok: true`. Run `planner taps` (or open Settings > NFC tap log): a 400 leaves a tap_log row with result `unknown_item`, so the log shows exactly which slug the Shortcut sent; compare it with the slugs in Settings > Routine items. No new row at all means the request never got past auth: a 401 (re-paste `SHORTCUT_TOKEN` in the Shortcut's header), a wrong URL, or no network |
 | A sticker tap does nothing at all | Notify When Run on? Screen on and phone unlocked once since boot? Camera/Wallet closed? Open the automation: after an iOS update it may say "Ask Before Running" again |
 | Second tap says "Already done" / "duplicate" | taps < 2 min apart are duplicates, 2-3 min are ignored, >= 3 min finish the item; edit or undo from Today |
@@ -327,7 +325,7 @@ Exit codes: 0 ok, 1 error (cannot reach the Worker, 401/403, server error), 2 us
 
 ---
 
-## 8. API summary (milestones 1-2)
+## 8. API summary
 
 | Method + path | Role | Purpose |
 |---|---|---|
@@ -340,9 +338,18 @@ Exit codes: 0 ok, 1 error (cannot reach the Worker, 401/403, server error), 2 us
 | `GET /api/tap/log` | app | last 100 taps |
 | `GET /api/health/automations` | app | automation_health rows |
 | `GET /api/settings` | app | parsed settings (write them through `/api/write`, table `settings`) |
+| `GET /api/foods?q&limit`, `GET /api/meals`, `GET /api/food-log?day` | app | Food tab lists and a day's entries with totals by slot |
+| `POST /api/foods`, `POST /api/food-log` | app | Claude Code helpers: add a food from label numbers (per-serving is converted to per 100 g, 4/4/9 warnings), log something eaten with a macro snapshot |
+| `GET /api/lookup/search?q&type`, `GET /api/lookup/barcode/:code` | app | USDA FoodData Central search (key stays on the Worker) and the Branded-by-GTIN fallback behind a barcode scan |
+| `GET /api/exercises`, `GET /api/workouts`, `GET /api/workouts/:id`, `GET /api/lift/template?name`, `GET /api/lift/last-sets?exercise_id`, `GET /api/exercises/:id/history?range` | app | Lift tab: history, session detail, template pre-population, set pre-fill, progress charts |
+| `POST /api/sets` | app | Claude Code helper: log sets (creates the exercise / workout when asked) |
+| `GET /api/projects`, `GET /api/sessions?from&to`, `GET /api/projects/:id/log`, `GET /api/work/week?day` | app | Work tab: projects, sessions with per-project sums, the per-project changelog, this week vs last week |
+| `POST /api/sessions`, `POST /api/time-blocks` | app | Claude Code helpers: a finished session, blocks that fill gaps in the day chart |
+| `POST /api/screentime` | mac, app | hourly Mac usage (window replace, idempotent) and phone hours from `planner screentime phone` |
+| `GET /api/apps` | app | Mac bundle ids seen, uncategorised first (Settings > Mac apps) |
+| `GET /api/summary?from&to`, `POST /api/rollup`, `POST /api/cron/run`, `GET /api/export` | app | Week/Month review rows (`day_summary`), a manual rebuild, the nightly job on demand, a JSON dump of every table |
 
 Everything else in `docs/plan.md` (food, lifting, sessions, lookups, screentime, summaries, export, cron rollups)
-arrives in milestones 3-5 and returns 404 until then. Rollups, export and the nightly cron are described in section 10.
 rows.
 
 ---
@@ -432,3 +439,18 @@ and `planner screentime phone --day YYYY-MM-DD --hours '{"7":12,...}'` turns the
 Screen Time screenshot into UTC `_total` rows and posts them as the app role (`--dry-run` prints the body first).
 `bash scripts/smoke.sh` runs `scripts/smoke-rollup.sh` too: it seeds yesterday, rebuilds it, checks the summary
 range (today live, at most 3 recomputes), the cron, the export and the background rebuild after a write.
+
+## 11. Food, Lift and Work tabs
+
+- **Food**: the kcal bar and P/C/F bars vs your targets (Settings), a quick-add grid of presaved meals (tap logs 1x with an
+  Undo toast, hold picks a portion), search over your foods and meals, and the day's log grouped by slot (tap a row to edit
+  grams or delete; select rows to save them as a meal). Add a food by **Scan** (a still photo of the barcode; Open Food
+  Facts first, USDA second, then the label form), **Search** (USDA generic or branded) or **Add by label** (per serving +
+  serving grams, or per 100 g directly, with a 4/4/9 sanity chip). New foods from a label photo can also come in through
+  Claude Code: paste the photo and say `/label`.
+- **Lift**: template chips (the last five workout names) start a session pre-populated with that template's last exercise
+  list; the active workout logs a set with one tap (set N pre-fills from last time's set N), flags PRs (Epley e1RM), and
+  finishes with a summary; history is grouped by month with a detail view and per-exercise progress charts.
+- **Work**: one-tap Start per project, a running banner on every tab, End with a single "what got done" line, manual
+  sessions (25 / 50 / 90 min chips), this week vs last week per project, and a per-project changelog of your notes. The
+  evening check-in on Today pre-fills a one-line summary of the day's sessions, workout and routine.
