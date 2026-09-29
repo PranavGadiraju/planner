@@ -392,3 +392,43 @@ wake yet) is painted up to now for the first 14 hours; after that it becomes an 
 
 `planner day yesterday` prints all of this as text (totals table, one row per block, the gaps) so Claude Code can
 answer "how did yesterday go" without a screenshot; `--json` gives the raw `buildDay` result.
+
+---
+
+## 10. Milestone 7: review + rollups
+
+The **Day** tab now has a **Day | Week | Month** switch at the top (remembered on the device; the route stays
+`#/day[/YYYY-MM-DD]`, and the date in the route anchors the week or month shown).
+
+**What is stored.** Every past local day gets one `day_summary` row: the eight category totals from `buildDay`
+(the same pass the Day tab draws, so the week adds up to exactly what the days show), `tracked_s`, the
+`mac_by_category` / `study_by_project` / `manual_by_category` maps as JSON, kcal and macros summed from
+`food_log`, sets and volume (warm-ups excluded from the volume) from `sets` joined to that day's workouts,
+sessions, routine done/total, the night's `bed_late_min`, and `final` = 1 once the day is two or more days old
+(after that the row is served as it is and never recomputed). Today is never stored: `GET /api/summary` computes
+it live (`live: true`) on every request.
+
+**When rows are rebuilt.** Three paths keep the summaries honest: (1) a `POST /api/write` that touches a past day
+rebuilds that day right after the response (`ctx.waitUntil`) and keeps the `dirty_days` mark as a fallback;
+(2) the nightly cron (`5 8 * * *` UTC = 04:05 New York) rebuilds D-1 and D-2, drains up to 10 `dirty_days`
+(oldest first), auto-closes workouts and sessions left open for more than 3 h (`ended_by = 'auto'`; a workout ends
+2 min after its last set, a session at start + 3 h), marks days <= D-2 final, prunes `tap_log` to 500 rows and
+writes the `cron` automation_health row (`planner health` shows the last run and its summary); (3)
+`GET /api/summary?from&to` (at most 62 days) recomputes up to 3 missing or non-final days per request (oldest
+first) and returns the rest with `stale: true`, which the Week and Month views show as a small refresh icon under
+the day: tap it to `POST /api/rollup {day}` for that day. `POST /api/cron/run` runs the cron on demand.
+
+**Week view.** Seven stacked columns (Mon-Sun, hatched = Unknown), the per-category totals with the average per
+day and the change vs last week (the current week compares Mon..today with the same weekdays of last week, "so
+far"), the bedtime dots against the target line (late minutes labelled, nights on target, current streak), routine
+completion squares per day, the kcal average vs target when food was logged, and study hours by project.
+**Month view.** Category shares of tracked time with the change in percentage points vs the previous month, a
+calendar of days where each cell's fill is the tracked share (hatched = unknown or no data, so empty days stand
+out; tap a day to open it), study by project, nights on target and average late minutes.
+
+**CLI.** `planner rollup [day]` rebuilds and prints a day's row, `planner export [--out FILE]` writes
+`GET /api/export` (every table, 20k rows per table cap noted in the file) to `~/planner-backups/export-<date>.json`,
+and `planner screentime phone --day YYYY-MM-DD --hours '{"7":12,...}'` turns the local hours read from an iPhone
+Screen Time screenshot into UTC `_total` rows and posts them as the app role (`--dry-run` prints the body first).
+`bash scripts/smoke.sh` runs `scripts/smoke-rollup.sh` too: it seeds yesterday, rebuilds it, checks the summary
+range (today live, at most 3 recomputes), the cron, the export and the background rebuild after a write.

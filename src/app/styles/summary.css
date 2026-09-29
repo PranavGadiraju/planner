@@ -1,0 +1,108 @@
+/* Day tab: the Day | Week | Month switch and the Week / Month review views (milestone 7). Imported by screens/Day.tsx. */
+
+/* ---- view switch (second header row) ---------------------------------------------------------- */
+.view-row { display: flex; justify-content: center; padding: 0 0 8px; }
+.view-seg { width: 100%; max-width: 320px; }
+.view-seg button { flex: 1; min-width: 0; }
+
+/* ---- stale day refresh ------------------------------------------------------------------------- */
+.stale-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--warn-soft); color: var(--warn); margin-top: 2px;
+}
+.stale-btn:disabled { opacity: 0.5; }
+
+/* ---- delta badge ------------------------------------------------------------------------------- */
+.delta { display: inline-flex; align-items: baseline; min-width: 64px; justify-content: flex-end; font-size: 13px; font-weight: 600; color: var(--text-3); white-space: nowrap; }
+.delta[data-tone="up"] { color: var(--accent); }
+.delta[data-tone="down"] { color: var(--warn); }
+.delta-suffix { font-size: 11px; font-weight: 500; color: var(--text-3); }
+
+/* ---- week columns ------------------------------------------------------------------------------ */
+.week-svg { width: 100%; height: auto; display: block; }
+.week-grid { stroke: var(--border); stroke-width: 1; }
+.week-empty { fill: repeating-linear-gradient(135deg, var(--cat-unknown) 0 2px, transparent 2px 4px); fill: url(#wk-hatch); opacity: 0.5; }
+.week-future { fill: var(--surface-2); }
+.week-labels { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0; margin-top: 6px; }
+.week-labels-tight { margin-top: 0; }
+.week-label { display: flex; flex-direction: column; align-items: center; gap: 0; min-height: 44px; padding: 4px 0; border-radius: 10px; color: var(--text-2); }
+.week-label:active { background: var(--surface-2); }
+.week-label:disabled { opacity: 0.45; }
+.week-label.is-today .week-dom { background: var(--accent); color: var(--on-accent); }
+.week-dow { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); text-align: center; }
+.week-dow.is-today { color: var(--accent); }
+.week-dom { font-size: 14px; font-weight: 600; line-height: 22px; min-width: 22px; text-align: center; border-radius: 11px; }
+.week-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; font-size: 12px; color: var(--text-2); }
+
+/* ---- totals list ------------------------------------------------------------------------------- */
+.totals-list { display: flex; flex-direction: column; }
+.totals-row { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 0; border-top: 1px solid var(--border); }
+.totals-row:first-child { border-top: 0; }
+.totals-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.totals-label { font-size: 15px; font-weight: 600; }
+.totals-avg { line-height: 1.2; }
+.totals-sum { font-size: 15px; font-weight: 600; white-space: nowrap; }
+
+/* ---- bedtime dots ------------------------------------------------------------------------------ */
+.bed-svg { width: 100%; height: auto; display: block; margin-top: 2px; }
+.bed-grace { fill: var(--accent-soft); }
+.bed-target { stroke: var(--text-3); stroke-width: 1; stroke-dasharray: 3 3; }
+.bed-axis { font-size: 9px; fill: var(--text-3); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.bed-stem { stroke: var(--border-strong); stroke-width: 1.5; }
+.bed-dot { stroke: var(--surface); stroke-width: 2; }
+.bed-ok { fill: var(--accent); }
+.bed-warn { fill: var(--warn); }
+.bed-late { fill: var(--danger); }
+.bed-dot-none { fill: none; stroke: var(--border-strong); stroke-width: 1.5; }
+.bed-dot-future { fill: var(--surface-2); stroke: var(--border); stroke-width: 1; }
+.bed-lbl { font-size: 10.5px; font-weight: 700; fill: var(--text-2); }
+.bed-foot { margin-top: 6px; }
+
+/* ---- routine squares --------------------------------------------------------------------------- */
+.routine-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.routine-col { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0; border-radius: 10px; }
+.routine-col.is-future { opacity: 0.4; }
+.routine-col.is-today .week-dow { color: var(--accent); }
+.routine-squares { display: flex; flex-direction: column-reverse; gap: 3px; min-height: 62px; justify-content: flex-start; }
+.sq { display: block; width: 14px; height: 10px; border-radius: 3px; background: var(--surface-3); }
+.sq.on { background: var(--cat-routine); }
+.sq.none { background: transparent; border: 1px dashed var(--border-strong); }
+
+/* ---- bars (food, study) ------------------------------------------------------------------------ */
+.bar { position: relative; height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.bar-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--c, var(--accent)); max-width: 100%; }
+.bar-mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-3); }
+.kcal-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.kcal-big { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+.proj-list { display: flex; flex-direction: column; gap: 10px; }
+.proj-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: baseline; }
+.proj-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proj-hours { font-size: 14px; color: var(--text-2); }
+.proj-row .bar { grid-column: 1 / -1; }
+
+/* ---- month ------------------------------------------------------------------------------------- */
+.shares-list { display: flex; flex-direction: column; margin-top: 10px; }
+.shares-row { display: flex; align-items: center; gap: 10px; min-height: 40px; border-top: 1px solid var(--border); }
+.shares-row:first-child { border-top: 0; }
+.shares-pct { font-size: 15px; font-weight: 600; min-width: 44px; text-align: right; }
+.shares-foot { margin-top: 8px; }
+.stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 4px; border-radius: var(--radius); background: var(--surface-2); }
+.stat-big { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+
+.month-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.month-dow { font-size: 11px; font-weight: 600; color: var(--text-3); text-align: center; padding-bottom: 2px; }
+.month-cell {
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px;
+  min-height: 52px; padding: 4px 2px; border-radius: 10px; background: var(--surface-2); color: var(--text-2);
+}
+.month-cell:active { filter: brightness(1.1); }
+.month-cell.blank { background: transparent; }
+.month-cell.future { background: var(--surface-2); opacity: 0.45; }
+.month-cell.nodata .month-bar { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--cat-unknown) 45%, transparent) 0 3px, transparent 3px 6px); }
+.month-cell.is-today .month-num { background: var(--accent); color: var(--on-accent); }
+.month-num { font-size: 12px; font-weight: 600; line-height: 18px; min-width: 18px; border-radius: 9px; text-align: center; }
+.month-bar { position: relative; width: 14px; height: 22px; border-radius: 4px; overflow: hidden;
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--cat-unknown) 45%, transparent) 0 3px, transparent 3px 6px); }
+.month-fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--accent); }
+.month-cell .stale-btn { position: absolute; top: -2px; right: -2px; width: 20px; height: 20px; }

@@ -1,6 +1,8 @@
 // GET /api/day/:date — the live 24-hour timeline for one local day. Every source is loaded in ONE D1 batch and
 // handed to the shared buildDay (one pass over <= 1500 minute cells), so the handler stays well inside 10 ms CPU.
-import type { RouteContext } from '../env'
+// The loader (loadDayInput) is shared with the rollups (src/worker/rollup.ts), which append their own aggregate
+// statements to the same batch.
+import type { Env, RouteContext } from '../env'
 import { HttpError, json } from '../http'
 import { parseDayParam } from '../router'
 import { addDays, dayWindow } from '../../shared/tz'
@@ -18,23 +20,30 @@ export interface DayPayload extends DayResult {
   time_blocks: TimeBlock[]
 }
 
+/** Everything buildDay needs for one day, plus the rows the API exposes next to the result. */
+export interface DayInputBundle {
+  input: DayInput
+  /** Every non-deleted routine item (active or not), so old logs keep their name and category. */
+  items: RoutineItem[]
+  projects: DayProject[]
+  /** Results of the `extra` statements handed to loadDayInput, in order. */
+  extra: D1Result<unknown>[]
+}
+
 function rows<T>(r: D1Result<unknown> | undefined): T[] {
   return (r?.results ?? []) as T[]
 }
 
-export async function day(c: RouteContext): Promise<Response> {
-  const { env, now } = c
-  const tz = env.TZ
-  const date = parseDayParam(c.params['date'] ?? '', now, tz)
-  if (!date) throw new HttpError(400, 'date must be YYYY-MM-DD or today')
+const SOURCE_STATEMENTS = 11
+
+/** The per-source SELECTs for one local day, in the order parseDayInput expects them. */
+function sourceStatements(db: D1Database, date: string, tz: string): D1PreparedStatement[] {
   const { start, end } = dayWindow(date, tz)
   const startIso = start.toISOString()
   const endIso = end.toISOString()
   // Hour buckets are UTC hours; local midnight can sit inside one, so take the hour before the window too.
   const hourFloorIso = new Date(start.getTime() - 3600_000).toISOString()
-  const db = env.DB
-
-  const [blocksR, sleepR, workoutsR, sessionsR, logR, itemsR, intervalsR, hoursR, catsR, foodR, projectsR] = await db.batch([
+  return [
     db.prepare('SELECT * FROM time_blocks WHERE start_ts < ? AND end_ts > ? AND deleted_at IS NULL ORDER BY start_ts').bind(endIso, startIso),
     db.prepare('SELECT * FROM sleep WHERE night_of IN (?, ?) AND deleted_at IS NULL ORDER BY night_of').bind(addDays(date, -1), date),
     db.prepare(
@@ -54,8 +63,17 @@ export async function day(c: RouteContext): Promise<Response> {
     db.prepare('SELECT app_id, label, category FROM app_categories WHERE deleted_at IS NULL'),
     db.prepare('SELECT ts, label, kcal, slot FROM food_log WHERE local_day = ? AND deleted_at IS NULL ORDER BY ts').bind(date),
     db.prepare('SELECT id, name, color FROM projects WHERE deleted_at IS NULL ORDER BY position, id'),
-  ])
+  ]
+}
 
+/**
+ * Load every buildDay source for `date` in one D1 batch. `extra` statements ride in the same batch and come back
+ * as `extra` results (the rollup uses this for its SQL sums), so a rebuild costs one read batch and one write batch.
+ */
+export async function loadDayInput(env: Env, date: string, now: Date, extra: D1PreparedStatement[] = []): Promise<DayInputBundle> {
+  const tz = env.TZ
+  const results = await env.DB.batch([...sourceStatements(env.DB, date, tz), ...extra])
+  const [blocksR, sleepR, workoutsR, sessionsR, logR, itemsR, intervalsR, hoursR, catsR, foodR, projectsR] = results
   const items = rows<RoutineItem>(itemsR)
   const input: DayInput = {
     day: date,
@@ -72,10 +90,18 @@ export async function day(c: RouteContext): Promise<Response> {
     app_categories: rows<Pick<AppCategoryRow, 'app_id' | 'label' | 'category'>>(catsR),
     food_log: rows<Pick<FoodLog, 'ts' | 'label' | 'kcal' | 'slot'>>(foodR),
   }
+  return { input, items, projects: rows<DayProject>(projectsR), extra: results.slice(SOURCE_STATEMENTS) }
+}
+
+export async function day(c: RouteContext): Promise<Response> {
+  const { env, now } = c
+  const date = parseDayParam(c.params['date'] ?? '', now, env.TZ)
+  if (!date) throw new HttpError(400, 'date must be YYYY-MM-DD or today')
+  const { input, items, projects } = await loadDayInput(env, date, now)
   const payload: DayPayload = {
     ...buildDay(input),
     routine_items: items.filter((i) => Number(i.active) === 1),
-    projects: rows<DayProject>(projectsR),
+    projects,
     time_blocks: input.time_blocks,
   }
   return json(payload)
