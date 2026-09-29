@@ -21,7 +21,14 @@ export interface SummaryResponse {
   days: SummaryDay[]
   /** Live projects, so the client can name the study_by_project keys. */
   projects: DayProject[]
+  /** Earliest local day with any data; days before it are "no data", never stale, never rebuilt. */
+  first_day: string | null
 }
+
+const FIRST_DAY_SQL =
+  'SELECT MIN(d) AS d FROM (SELECT MIN(local_day) AS d FROM routine_log UNION ALL SELECT MIN(night_of) FROM sleep ' +
+  'UNION ALL SELECT MIN(local_day) FROM food_log UNION ALL SELECT MIN(local_day) FROM workouts ' +
+  'UNION ALL SELECT MIN(local_day) FROM sessions UNION ALL SELECT MIN(local_day) FROM day_summary)'
 
 /** GET /api/summary?from&to (app) */
 export async function summary(c: RouteContext): Promise<Response> {
@@ -30,18 +37,24 @@ export async function summary(c: RouteContext): Promise<Response> {
   const { from, to } = parseRange(url.searchParams.get('from'), url.searchParams.get('to'), now, tz)
   const today = localDay(now, tz)
   const db = env.DB
-  const [rowsR, dirtyR, projectsR] = await db.batch([
+  const [rowsR, dirtyR, projectsR, firstR] = await db.batch([
     db.prepare(SUMMARY_SELECT_SQL).bind(from, to),
     db.prepare('SELECT local_day FROM dirty_days WHERE local_day >= ? AND local_day <= ?').bind(from, to),
     db.prepare('SELECT id, name, color FROM projects WHERE deleted_at IS NULL ORDER BY position, id'),
+    db.prepare(FIRST_DAY_SQL),
   ])
+  const firstRaw = ((firstR?.results ?? [])[0] as { d: string | null } | undefined)?.d
+  const firstDay = typeof firstRaw === 'string' ? firstRaw : null
   const stored = new Map<string, DaySummary>()
   for (const r of (rowsR?.results ?? []) as DaySummaryRow[]) stored.set(r.local_day, rowToSummary(r))
   const dirty = new Set(((dirtyR?.results ?? []) as { local_day: string }[]).map((r) => r.local_day))
 
   const days = dayRange(from, to)
-  const plan = planRange(days, stored, dirty, today)
+  // Days before the first data day are empty by definition: no stale flag, no rebuild budget spent on them.
+  const before = firstDay ? days.filter((d) => d < firstDay) : []
+  const plan = planRange(firstDay ? days.filter((d) => d >= firstDay) : days, stored, dirty, today)
   const out = new Map<string, SummaryDay>()
+  for (const d of before) out.set(d, emptySummary(d))
   for (const d of [...plan.final, ...plan.asIs]) out.set(d, stored.get(d) ?? emptySummary(d))
   for (const d of plan.stale) out.set(d, { ...(stored.get(d) ?? emptySummary(d)), stale: true })
   // Live today and the (<= 3) rebuilds run side by side: D1 latency is wall-clock, the work itself is small.
@@ -56,6 +69,7 @@ export async function summary(c: RouteContext): Promise<Response> {
     from, to, today,
     days: days.filter((d) => out.has(d)).map((d) => out.get(d) as SummaryDay),
     projects: (projectsR?.results ?? []) as DayProject[],
+    first_day: firstDay,
   }
   return json(res)
 }

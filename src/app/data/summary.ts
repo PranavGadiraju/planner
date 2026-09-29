@@ -8,7 +8,7 @@ import { apiGet, apiPost, type GetResult } from './api'
 import type { DaySummary } from '@shared/types'
 export type { DaySummary }
 export interface SummaryProject { id: string; name: string; color: string | null }
-export interface SummaryResponse { from: string; to: string; today: string; days: DaySummary[]; projects: SummaryProject[] }
+export interface SummaryResponse { from: string; to: string; today: string; days: DaySummary[]; projects: SummaryProject[]; first_day?: string | null }
 
 // ---- loading ------------------------------------------------------------------------------------------
 
