@@ -54,9 +54,11 @@ echo "== rollup smoke: today $TODAY, yesterday $YESTERDAY (tz $TZ_NAME)"
 
 # ---- seed yesterday: one routine tap (default 10 min for stretch) + one manual block (12:00-13:00)
 check "tap stretch yesterday (app, back-dated)" 200 '"action":"routine_started"' -X POST -H "$APP" -H "$J" -d "{\"item\":\"stretch\",\"ts\":\"$TAP_TS\"}" "$BASE/api/tap"
-# A routine row a week ago makes WEEK_AGO the first data day, so every later day in the range is "in scope".
-check "write routine row a week ago (app)" 200 '"applied":1' -X POST -H "$APP" -H "$J" \
-  -d "{\"mutations\":[{\"table\":\"routine_log\",\"rows\":[{\"local_day\":\"$WEEK_AGO\",\"item_id\":\"journal\",\"started_at\":\"${WEEK_AGO}T12:00:00.000Z\",\"ended_at\":null,\"source\":\"app\",\"updated_at\":\"$NOW\",\"deleted_at\":null}]}]}" "$BASE/api/write"
+# A routine row eight days ago (just outside the checked range) makes every day in the range "in scope" for the
+# first-data-day cutoff without pre-building any of the checked days.
+EIGHT_AGO="$(node -e 'const [y,m,d]=process.argv[1].split("-").map(Number);console.log(new Date(Date.UTC(y,m-1,d-1)).toISOString().slice(0,10))' "$WEEK_AGO")"
+check "write routine row eight days ago (app)" 200 '"applied":1' -X POST -H "$APP" -H "$J" \
+  -d "{\"mutations\":[{\"table\":\"routine_log\",\"rows\":[{\"local_day\":\"$EIGHT_AGO\",\"item_id\":\"journal\",\"started_at\":\"${EIGHT_AGO}T12:00:00.000Z\",\"ended_at\":null,\"source\":\"app\",\"updated_at\":\"$NOW\",\"deleted_at\":null}]}]}" "$BASE/api/write"
 check "write block yesterday 12-13 (app)" 200 '"applied":1,"rejected":\[\]' -X POST -H "$APP" -H "$J" \
   -d "{\"mutations\":[{\"table\":\"time_blocks\",\"rows\":[{\"id\":\"smoke-b1\",\"start_ts\":\"$B1_START\",\"end_ts\":\"$B1_END\",\"category\":\"meal\",\"label\":\"Lunch\",\"source\":\"app\",\"created_at\":\"$NOW\",\"updated_at\":\"$NOW\"}]}]}" "$BASE/api/write"
 
