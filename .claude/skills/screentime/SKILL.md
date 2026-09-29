@@ -5,7 +5,7 @@ description: Turn an iPhone Screen Time screenshot (Settings > Screen Time, day 
 
 # /screentime - log iPhone usage from a Screen Time screenshot
 
-Availability: `planner screentime phone` is available (milestone 7). If the command exits 2 or 1 (server
+Availability: `planner screentime phone` is available. If the command exits 2 or 1 (server
 unreachable, token missing), you can still read the screenshot and show the table, but say clearly that
 posting did not happen. (Mac usage never goes through this path: the hourly LaunchAgent in
 `mac/` pushes it automatically.)
