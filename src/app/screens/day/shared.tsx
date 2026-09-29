@@ -1,15 +1,18 @@
-// Pieces shared by the Day / Week / Month views: the segmented view switch (remembered in localStorage), the
-// /api/summary range hook, the header shell, the stale-day refresh button and the small delta badge.
+// Pieces shared by the Day / Week / Month views: the segmented view switch (the choice is remembered in
+// localStorage for the bare '#/day' tab tap), the /api/summary range hook, the header shell, the stale-day refresh
+// button, the small delta badge and the freshness foot.
 import type { ComponentChildren } from 'preact'
 import { useCallback, useEffect, useState } from 'preact/hooks'
 import { Icon } from '../../components/Icon'
 import { SyncDot } from '../../components/TopBar'
 import { toast } from '../../components/Toast'
 import { ApiError } from '../../data/api'
+import { dayState, freshnessLine, loadDay, watchDay } from '../../data/day'
+import { now, tz } from '../../data/store'
 import { fmtDelta, loadRange, rollupDay, type SummaryResponse } from '../../data/summary'
-import { navigate } from '../../router'
+import { navigate, type DayView } from '../../router'
 
-export type View = 'day' | 'week' | 'month'
+export type View = DayView
 const VIEW_KEY = 'planner.dayView'
 export const VIEWS: { id: View; label: string }[] = [
   { id: 'day', label: 'Day' },
@@ -41,7 +44,24 @@ export function ViewSwitch({ view, onChange }: { view: View; onChange: (v: View)
   )
 }
 
-/** Header for the period views: prev / title + sub / [pill] / next / sync, then the view switch row. */
+/**
+ * The header's second row: the view switch with the refresh button at its right (a spacer on the left keeps the
+ * switch centred). The refresh lives here, not in the title row, so a past day ("Mon 28 Sep" + Today pill) or a
+ * past week still fits five controls at 375 px.
+ */
+export function ViewRow({ switcher, onRefresh, refreshing }: { switcher: ComponentChildren; onRefresh: () => void; refreshing: boolean }) {
+  return (
+    <div class="view-row">
+      <span class="view-spacer" aria-hidden="true" />
+      {switcher}
+      <button type="button" class="icon-btn" onClick={onRefresh} aria-label="Refresh" disabled={refreshing}>
+        <Icon name="refresh" class={refreshing ? 'spin' : undefined} />
+      </button>
+    </div>
+  )
+}
+
+/** Header for the period views: prev / title + sub / [pill] / next / sync, then the view switch row with refresh. */
 export function PeriodBar({ title, sub, pill, onPrev, onNext, nextDisabled, onRefresh, refreshing, switcher }: {
   title: string
   sub: string
@@ -67,12 +87,9 @@ export function PeriodBar({ title, sub, pill, onPrev, onNext, nextDisabled, onRe
         <button type="button" class="icon-btn" onClick={onNext} aria-label="Next" disabled={nextDisabled}>
           <Icon name="chevron" />
         </button>
-        <button type="button" class="icon-btn" onClick={onRefresh} aria-label="Refresh" disabled={refreshing}>
-          <Icon name="refresh" class={refreshing ? 'spin' : undefined} />
-        </button>
         <SyncDot />
       </div>
-      <div class="view-row">{switcher}</div>
+      <ViewRow switcher={switcher} onRefresh={onRefresh} refreshing={refreshing} />
     </header>
   )
 }
@@ -137,6 +154,22 @@ export function DeltaBadge({ seconds, goodWhenUp = true, suffix }: { seconds: nu
     <span class="delta num" data-tone={tone}>
       {fmtDelta(seconds)}{suffix ? <span class="delta-suffix"> {suffix}</span> : null}
     </span>
+  )
+}
+
+/**
+ * "Mac last pushed 4 h ago · phone none today" from today's /api/day freshness field (the Week and Month views
+ * keep today watched for it). Renders nothing until the Worker sends the field.
+ */
+export function FreshnessFoot({ today, lead }: { today: string; lead?: string }) {
+  useEffect(() => { void loadDay(today); return watchDay(today) }, [today])
+  const f = dayState(today).value.data?.freshness
+  if (!f) return lead ? <p class="small faint day-foot">{lead}</p> : null
+  const line = freshnessLine(f, now.value, tz.value)
+  return (
+    <p class="small faint day-foot" aria-label="Source freshness">
+      {lead ? `${lead} ` : ''}<span class={line.macWarn ? 'warn' : undefined}>{line.mac}</span> · {line.phone}
+    </p>
   )
 }
 

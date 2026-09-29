@@ -11,7 +11,7 @@ import {
   monthLabel, monthOf, monthShort, pick, shareDeltas, shares, shiftMonth, sumDays, unknownShare, type DaySummary, type SumCategory,
 } from '../../data/summary'
 import { navigate } from '../../router'
-import { PeriodBar, StaleRefresh, TokenBanner, useSummary } from './shared'
+import { FreshnessFoot, PeriodBar, StaleRefresh, TokenBanner, useSummary } from './shared'
 import { FoodCard, StudyCard } from './Week'
 
 const WORSE_WHEN_UP = new Set<SumCategory>(['phone', 'unknown'])
@@ -25,7 +25,7 @@ export function MonthView({ date, today, switcher, onOpenDay }: { date: string; 
   const rows = byDay(s.data?.days ?? [])
   const projects = s.data?.projects ?? []
 
-  const go = (firstOfMonth: string) => navigate(dayHash(firstOfMonth === monthOf(today).start ? today : firstOfMonth))
+  const go = (firstOfMonth: string) => navigate(dayHash(firstOfMonth === monthOf(today).start ? today : firstOfMonth, 'month'))
   const cur = sumDays(pick(rows, month.days))
   const prev = sumDays(pick(rows, prevMonth.days))
   const sh = shares(cur)
@@ -76,6 +76,7 @@ export function MonthView({ date, today, switcher, onOpenDay }: { date: string; 
             </section>
             {food.avg !== null && <FoodCard avg={food.avg} days={food.days} target={settings.value.targets.kcal} />}
             {s.cached && <p class="small faint day-foot">Showing a cached copy; tap refresh when back online.</p>}
+            <FreshnessFoot today={today} />
           </>
         )}
       </main>

@@ -12,7 +12,7 @@ import {
   mergeMaps, pick, routineCompletion, secondsOf, soFar, sumDays, weekLabel, weekOf, type DaySummary, type SumCategory, type Sums, type SummaryProject,
 } from '../../data/summary'
 import { navigate } from '../../router'
-import { DeltaBadge, PeriodBar, StaleRefresh, TokenBanner, useSummary } from './shared'
+import { DeltaBadge, FreshnessFoot, PeriodBar, StaleRefresh, TokenBanner, useSummary } from './shared'
 
 /** Bottom-to-top stacking order of a column: rest first, screens, hand-typed, Unknown on top. */
 const STACK: SumCategory[] = ['sleep', 'routine', 'workout', 'study', 'mac', 'phone', 'other', 'unknown']
@@ -29,7 +29,7 @@ export function WeekView({ date, today, switcher, onOpenDay }: { date: string; t
   const rows = byDay(s.data?.days ?? [])
   const projects = s.data?.projects ?? []
 
-  const go = (start: string) => navigate(dayHash(start === weekStart(today) ? today : start))
+  const go = (start: string) => navigate(dayHash(start === weekStart(today) ? today : start, 'week'))
   const cur = sumDays(pick(rows, week.days))
   // Averages come from complete days only: a live today (a few hours in) would drag every "avg / day" down.
   const complete = sumDays(pick(rows, week.days).filter((d) => !d.live))
@@ -74,7 +74,8 @@ export function WeekView({ date, today, switcher, onOpenDay }: { date: string; t
             <RoutineCard per={routine.per_day} done={routine.done} total={routine.total} today={today} />
             {food.avg !== null && <FoodCard avg={food.avg} days={food.days} target={settings.value.targets.kcal} />}
             {study.length > 0 && <StudyCard rows={study} projects={projects} />}
-            {s.cached && <p class="small faint day-foot">Showing a cached copy; pull down or tap refresh when back online.</p>}
+            {s.cached && <p class="small faint day-foot">Showing a cached copy; tap refresh when back online.</p>}
+            <FreshnessFoot today={today} />
           </>
         )}
       </main>

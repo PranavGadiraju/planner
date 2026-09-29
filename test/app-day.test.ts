@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { buildDay, type DayInput, type DayResult } from '@shared/day'
 import type { TimeBlock } from '@shared/types'
 import {
-  applyRange, clearRange, daysTouched, gapNeighbours, hm, hourDominant, insertBlock, minuteOf, ringSummary, stripSegments, toBlockCategory,
+  applyRange, blockApps, clearRange, daysTouched, gapNeighbours, hm, hourDominant, insertBlock, minuteOf, nearestStudyProject, ringSummary, stripSegments,
+  toBlockCategory,
 } from '../src/app/data/daymath'
-import { parseHash } from '../src/app/router'
+import { freshnessLine } from '../src/app/data/day'
+import { dayViewHash, parseHash } from '../src/app/router'
 
 const TZ = 'America/New_York'
 const DAY = '2026-09-28'
@@ -153,9 +155,68 @@ describe('daysTouched', () => {
 })
 
 describe('day routes', () => {
-  it('parses #/day and #/day/YYYY-MM-DD', () => {
-    expect(parseHash('#/day')).toEqual({ name: 'day', date: null })
-    expect(parseHash('#/day/2026-09-27')).toEqual({ name: 'day', date: '2026-09-27' })
+  it('parses the bare tab, a dated timeline and the week / month views', () => {
+    expect(parseHash('#/day')).toEqual({ name: 'day', view: null, date: null })
+    expect(parseHash('#/day/2026-09-27')).toEqual({ name: 'day', view: 'day', date: '2026-09-27' })
+    expect(parseHash('#/day/week')).toEqual({ name: 'day', view: 'week', date: null })
+    expect(parseHash('#/day/week/2026-09-21')).toEqual({ name: 'day', view: 'week', date: '2026-09-21' })
+    expect(parseHash('#/day/month')).toEqual({ name: 'day', view: 'month', date: null })
+    expect(parseHash('#/day/month/2026-08-01')).toEqual({ name: 'day', view: 'month', date: '2026-08-01' })
+  })
+  it('falls back to Today for anything else under #/day', () => {
     expect(parseHash('#/day/nope')).toEqual({ name: 'today' })
+    expect(parseHash('#/day/week/nope')).toEqual({ name: 'today' })
+    expect(parseHash('#/day/year')).toEqual({ name: 'today' })
+  })
+  it('builds hashes: a timeline always carries its date, week / month omit today', () => {
+    expect(dayViewHash('day', DAY, DAY)).toBe(`#/day/${DAY}`)
+    expect(dayViewHash('day', '2026-09-27', DAY)).toBe('#/day/2026-09-27')
+    expect(dayViewHash('week', DAY, DAY)).toBe('#/day/week')
+    expect(dayViewHash('week', '2026-09-21', DAY)).toBe('#/day/week/2026-09-21')
+    expect(dayViewHash('month', DAY, DAY)).toBe('#/day/month')
+    expect(dayViewHash('month', '2026-08-01', DAY)).toBe('#/day/month/2026-08-01')
+    // every hash the helper makes parses back to the same view and date
+    for (const [view, date] of [['day', DAY], ['week', '2026-09-21'], ['month', DAY]] as const) {
+      const r = parseHash(dayViewHash(view, date, DAY))
+      expect(r).toMatchObject({ name: 'day', view, date: date === DAY && view !== 'day' ? null : date })
+    }
+  })
+})
+
+describe('fill sheet project default', () => {
+  const study = (start: string, end: string, sub: string | null) => ({ start: local(DAY, start), end: local(DAY, end), minutes: 0, category: 'study' as const, sub, label: 'Study', source: 'session' })
+  it('picks the study block nearest to the gap, ties to the earlier one, none without a project', () => {
+    const blocks = [study('09:00', '10:00', 'p1'), study('14:00', '15:00', 'p2'), study('20:00', '21:00', null)]
+    expect(nearestStudyProject({ blocks }, local(DAY, '10:30'), local(DAY, '11:00'))).toBe('p1')
+    expect(nearestStudyProject({ blocks }, local(DAY, '13:00'), local(DAY, '13:30'))).toBe('p2')
+    expect(nearestStudyProject({ blocks }, local(DAY, '11:30'), local(DAY, '12:30'))).toBe('p1') // 90 min from both: earlier wins
+    expect(nearestStudyProject({ blocks }, local(DAY, '14:20'), local(DAY, '14:40'))).toBe('p2') // overlapping = distance 0
+    expect(nearestStudyProject({ blocks }, local(DAY, '22:00'), local(DAY, '23:00'))).toBe('p2') // the 20:00 block has no project
+    expect(nearestStudyProject(morning(), local(DAY, '08:20'), local(DAY, '09:00'))).toBeNull()
+  })
+})
+
+describe('blockApps', () => {
+  const base = { start: local(DAY, '09:00'), end: local(DAY, '10:00'), minutes: 60, category: 'study' as const, sub: 'p1', label: 'Study', source: 'session' }
+  it('reads the Worker-attached list and ignores blocks without one or with junk entries', () => {
+    expect(blockApps(base)).toEqual([])
+    const withApps = { ...base, apps: [{ label: 'Code', seconds: 1800 }, { label: '', seconds: 5 }, { label: 'Safari', seconds: 0 }, null, 'x', { label: 'Terminal', seconds: 120 }] }
+    expect(blockApps(withApps as unknown as typeof base)).toEqual([{ label: 'Code', seconds: 1800 }, { label: 'Terminal', seconds: 120 }])
+    expect(blockApps({ ...base, apps: 'nope' } as unknown as typeof base)).toEqual([])
+  })
+})
+
+describe('freshnessLine', () => {
+  const at = new Date(local(DAY, '14:00'))
+  it('reports the Mac push age (stale during the day after 3 h) and the phone hours for today', () => {
+    const fresh = freshnessLine({ mac_last_hour: local(DAY, '13:00'), mac_last_ok_at: local(DAY, '13:05'), phone_last_hour: local(DAY, '11:00') }, at, TZ)
+    expect(fresh).toEqual({ mac: 'Mac last pushed 55 min ago', macWarn: false, phone: 'phone through 11:00' })
+    const stale = freshnessLine({ mac_last_hour: local(DAY, '09:00'), mac_last_ok_at: null, phone_last_hour: local('2026-09-27', '20:00') }, at, TZ)
+    expect(stale).toEqual({ mac: 'Mac last pushed 5 h ago', macWarn: true, phone: 'phone none today' })
+    expect(freshnessLine({ mac_last_hour: null, mac_last_ok_at: null, phone_last_hour: null }, at, TZ)).toEqual({ mac: 'Mac no data yet', macWarn: false, phone: 'phone none today' })
+  })
+  it('does not warn about a quiet Mac at night', () => {
+    const night = new Date(local(DAY, '23:30'))
+    expect(freshnessLine({ mac_last_hour: local(DAY, '18:00'), mac_last_ok_at: null, phone_last_hour: null }, night, TZ).macWarn).toBe(false)
   })
 })

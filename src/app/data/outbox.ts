@@ -103,6 +103,8 @@ export async function clearQueue(): Promise<void> {
 let inFlight: Promise<void> | null = null
 let retryTimer: ReturnType<typeof setTimeout> | null = null
 let failures = 0
+/** Rows per request: MAX_BATCH, halved after every oversize answer until the queue drains. */
+let batchLimit = MAX_BATCH
 
 function scheduleRetry(): void {
   if (retryTimer) return
@@ -128,6 +130,17 @@ function isAuthFailure(status: number): boolean {
 /** Other 4xx answers will never succeed on retry (bad rows, oversize batch); 408 and 429 are transient. */
 function isPermanent(status: number): boolean {
   return status >= 400 && status < 500 && !isAuthFailure(status) && status !== 408 && status !== 429
+}
+/**
+ * A permanent answer that only says the batch was too big: 413 from the Worker's body cap, or its 400
+ * "at most N rows per request". Smaller batches of the same rows would go through, so split instead of burying.
+ */
+export function isOversize(status: number, message: string): boolean {
+  return status === 413 || (status === 400 && /^at most\b/i.test(message.trim()))
+}
+/** The batch size to retry with after an oversize answer (half, rounded up), or null when one row is already too big. */
+export function shrinkBatch(size: number): number | null {
+  return size <= 1 ? null : Math.ceil(size / 2)
 }
 
 /** A short human key for a row: its id, settings key, or (local_day, item) pair. */
@@ -160,12 +173,12 @@ async function run(): Promise<void> {
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
   const q = await readQueue()
   pending.value = q.length
-  if (q.length === 0) { status.value = 'idle'; return }
+  if (q.length === 0) { status.value = 'idle'; batchLimit = MAX_BATCH; return }
   if (!hasToken()) { status.value = 'unauthorized'; return }
   if (typeof navigator !== 'undefined' && navigator.onLine === false) { status.value = 'error'; lastError.value = 'offline'; scheduleRetry(); return }
 
   status.value = 'syncing'
-  const batch = q.slice(0, MAX_BATCH)
+  const batch = q.slice(0, batchLimit)
   const body: WriteRequest = { mutations: [] }
   // Rows travel in enqueue order (only adjacent rows of one table are grouped): a workout/exercise/project/food
   // row enqueued before its sets/sessions/log rows must reach D1 first or the foreign key rejects the child.
@@ -184,6 +197,15 @@ async function run(): Promise<void> {
       lastError.value = err.status === 403 ? 'Token has the wrong role' : 'Token rejected'
       authFailed.value = true
       return // stop until the token changes; the store flushes again when it does
+    }
+    if (err instanceof ApiError && isOversize(err.status, err.message)) {
+      // Too big as a whole, not wrong: send the same rows in two halves (and halves of halves) before giving up.
+      const smaller = shrinkBatch(batch.length)
+      if (smaller !== null) {
+        batchLimit = smaller
+        void flush()
+        return
+      }
     }
     if (err instanceof ApiError && isPermanent(err.status)) {
       // The server will keep saying no: park the batch, tell the user, move on to the rest of the queue.

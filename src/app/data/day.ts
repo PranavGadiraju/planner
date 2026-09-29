@@ -4,18 +4,26 @@
 // the flush.
 import { effect, signal, type Signal } from '@preact/signals'
 import type { DayResult } from '@shared/day'
-import type { Project, RoutineItem, TimeBlock } from '@shared/types'
+import type { HealthRow, Project, RoutineItem, TimeBlock } from '@shared/types'
 import { localDay } from '@shared/tz'
 import { ApiError, apiGet, hasToken, readCache, token } from './api'
+import { macLastSeen, macStatus, phoneStatus } from './apps'
+import { agoLabel, hhmm } from './format'
 import * as outbox from './outbox'
+import { dayViewHash, type DayView } from '../router'
 import { localToday, tz } from './store'
 import { clearRange, daysTouched, insertBlock } from './daymath'
+
+/** How fresh the automated sources are, as GET /api/day reports them (MAX() over screen_hours / automation_health). */
+export interface DayFreshness { mac_last_hour: string | null; phone_last_hour: string | null; mac_last_ok_at: string | null }
 
 export interface DayPayload extends DayResult {
   routine_items: RoutineItem[]
   projects: Project[]
   /** Live manual rows overlapping the window, when the API includes them; needed to edit or delete a block. */
   time_blocks?: TimeBlock[]
+  /** Present once the Worker sends it; the Day / Week / Month foot shows it. */
+  freshness?: DayFreshness
 }
 export interface DayState {
   date: string
@@ -154,7 +162,27 @@ export function watchDay(date: string): () => void {
   }
 }
 
-/** Hash for a date: '#/day' for today, '#/day/YYYY-MM-DD' otherwise. */
-export function dayHash(date: string): string {
-  return date === localToday.value ? '#/day' : `#/day/${date}`
+/** Hash for a date in one of the Day-tab views: '#/day/YYYY-MM-DD' (timeline), '#/day/week[/date]', '#/day/month[/date]'. */
+export function dayHash(date: string, view: DayView = 'day'): string {
+  return dayViewHash(view, date, localToday.value)
+}
+
+export interface FreshnessLine { mac: string; macWarn: boolean; phone: string }
+
+/**
+ * "Mac last pushed 4 h ago" · "phone none today" for the foot of the Day / Week / Month views, with the health
+ * strip's rules (macStatus / phoneStatus) deciding what counts as stale.
+ */
+export function freshnessLine(f: DayFreshness, now: Date, zone: string): FreshnessLine {
+  const macRow: HealthRow | null = f.mac_last_ok_at
+    ? { source: 'mac', last_ok_at: f.mac_last_ok_at, last_error_at: null, last_error: null, detail: null }
+    : null
+  const health = { rows: macRow ? [macRow] : [], mac_last_hour: f.mac_last_hour, phone_last_hour: f.phone_last_hour }
+  const macAt = macLastSeen(health)
+  const phoneToday = phoneStatus(health, now, zone).text.startsWith('Phone: today')
+  return {
+    mac: macAt ? `Mac last pushed ${agoLabel(macAt, now)}` : 'Mac no data yet',
+    macWarn: macStatus(health, now, zone).warn,
+    phone: phoneToday && f.phone_last_hour ? `phone through ${hhmm(f.phone_last_hour, zone)}` : 'phone none today',
+  }
 }

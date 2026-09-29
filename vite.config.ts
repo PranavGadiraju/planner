@@ -31,7 +31,9 @@ export default defineConfig({
       workbox: {
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
-        runtimeCaching: [{ urlPattern: /^\/api\//, handler: 'NetworkOnly' }],
+        // Workbox tests a RegExp against the full href (starts with "http"), so a leading-slash pattern never
+        // matches; a function sees the parsed URL and keeps every API call off the cache.
+        runtimeCaching: [{ urlPattern: ({ url }) => url.pathname.startsWith('/api/'), handler: 'NetworkOnly' }],
         globPatterns: ['**/*.{js,css,html,png,svg,wasm,woff2}'],
       },
     }),

@@ -66,7 +66,8 @@ function CheckinLine({ kind, day }: { kind: 'morning' | 'evening'; day: string }
     <form class="card" onSubmit={submit} aria-label={prompt}>
       <div class="card-head">
         <span class="card-title">{kind === 'morning' ? 'Morning' : 'Evening'}</span>
-        <button type="button" class="icon-btn" style={{ width: 36, height: 36, marginRight: -8 }} aria-label="Dismiss for today" onClick={() => dismiss(day, kind)}>
+        {/* full 44 px target; the negative margins keep the card head as short as before */}
+        <button type="button" class="icon-btn" style={{ margin: '-8px -10px -8px 0' }} aria-label="Dismiss for today" onClick={() => dismiss(day, kind)}>
           <Icon name="x" size={18} />
         </button>
       </div>

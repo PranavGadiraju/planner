@@ -107,6 +107,46 @@ export function toBlockCategory(c: ChartCategory): BlockCategory {
   return c === 'mac' || c === 'unknown' ? 'other' : c
 }
 
+/**
+ * The project of the study block closest to [start, end) (0 when they overlap, else the distance between the
+ * nearest edges; ties go to the earlier block): the Fill sheet's default project for a study gap. Null when the
+ * day has no study block with a project.
+ */
+export function nearestStudyProject(r: Pick<DayResult, 'blocks'>, start: string, end: string): string | null {
+  const s0 = new Date(start).getTime()
+  const e0 = new Date(end).getTime()
+  let best: string | null = null
+  let bestD = Infinity
+  for (const b of r.blocks) {
+    if (b.category !== 'study' || !b.sub) continue
+    const s = new Date(b.start).getTime()
+    const e = new Date(b.end).getTime()
+    const d = Math.max(0, s - e0, s0 - e)
+    if (d < bestD) { bestD = d; best = b.sub }
+  }
+  return best
+}
+
+// ---- top Mac apps inside a block ------------------------------------------------------------------------
+
+export interface BlockApp { label: string; seconds: number }
+
+/**
+ * The top Mac apps the Worker attaches to a study block (`Block.apps`, present once the shared type carries it).
+ * Read defensively: an older cached payload or an optimistic patch has none.
+ */
+export function blockApps(b: Block): BlockApp[] {
+  const raw = (b as Block & { apps?: unknown }).apps
+  if (!Array.isArray(raw)) return []
+  const out: BlockApp[] = []
+  for (const a of raw as unknown[]) {
+    if (!a || typeof a !== 'object') continue
+    const { label, seconds } = a as { label?: unknown; seconds?: unknown }
+    if (typeof label === 'string' && label && typeof seconds === 'number' && seconds > 0) out.push({ label, seconds })
+  }
+  return out
+}
+
 // ---- optimistic patch ----------------------------------------------------------------------------------
 
 type Cell = { category: ChartCategory; sub: string | null; label: string; source: string } | null

@@ -106,7 +106,7 @@ export function SuggestionItem({ s, day, payload, editable = false }: { s: Sugge
           </button>
         )}
         <button type="button" class="btn btn-sm btn-primary" onClick={() => void log()} disabled={busy || !project}>Log</button>
-        <button type="button" class="btn btn-sm" onClick={dismiss} disabled={busy}>Dismiss</button>
+        <button type="button" class="btn btn-sm" style={{ minHeight: 44 }} onClick={dismiss} disabled={busy}>Dismiss</button>
       </div>
       {picking && choices.length > 1 && (
         <div class="chip-scroll" role="group" aria-label="Project">

@@ -1,8 +1,9 @@
 /* Day tab: the Day | Week | Month switch and the Week / Month review views (milestone 7). Imported by screens/Day.tsx. */
 
-/* ---- view switch (second header row) ---------------------------------------------------------- */
-.view-row { display: flex; justify-content: center; padding: 0 0 8px; }
-.view-seg { width: 100%; max-width: 320px; }
+/* ---- view switch (second header row: spacer · switch · refresh) ------------------------------- */
+.view-row { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 0 8px; }
+.view-spacer { flex: none; width: 44px; }
+.view-seg { flex: 1 1 auto; min-width: 0; max-width: 320px; }
 .view-seg button { flex: 1; min-width: 0; }
 
 /* ---- stale day refresh ------------------------------------------------------------------------- */

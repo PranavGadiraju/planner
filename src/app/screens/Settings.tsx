@@ -1,19 +1,21 @@
-// Settings: token + test, preferences, links, and local-cache tools.
+// Settings: token + test, preferences, links (projects, exercises, routine, shortcut, taps, Mac apps), the
+// automation health rows, and the data tools (force sync, server export, cache export, reset).
 import { useEffect, useState } from 'preact/hooks'
 import { clear, entries, set } from 'idb-keyval'
-import type { Settings as SettingsT } from '@shared/types'
+import type { HealthRow, Settings as SettingsT } from '@shared/types'
 import { SubBar } from '../components/TopBar'
 import { Icon } from '../components/Icon'
 import { toast } from '../components/Toast'
-import { ApiError, apiGet, setToken, token } from '../data/api'
+import { ApiError, setToken, token } from '../data/api'
 import * as outbox from '../data/outbox'
-import { loadToday, saveSettings, settings, syncState, today } from '../data/store'
-import { minusMinutes } from '../data/format'
+import { loadToday, now, saveSettings, settings, syncState, today } from '../data/store'
+import { agoLabel, minusMinutes } from '../data/format'
 
 const DEVICE_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
 
 export function Settings() {
   const triage = today.value?.health.apps_to_triage ?? 0
+  const version = useWorkerVersion()
   return (
     <>
       <SubBar title="Settings" fallback="#/" />
@@ -22,6 +24,8 @@ export function Settings() {
         <PrefsSection />
         <section class="card" aria-label="More">
           <div class="list">
+            <a class="list-row list-link" href="#/work"><Icon name="journal" /><span class="grow">Projects</span><Icon name="chevron" size={18} /></a>
+            <a class="list-row list-link" href="#/lift/exercises"><Icon name="lift" /><span class="grow">Exercises</span><Icon name="chevron" size={18} /></a>
             <a class="list-row list-link" href="#/settings/routine"><Icon name="list" /><span class="grow">Routine items</span><Icon name="chevron" size={18} /></a>
             <a class="list-row list-link" href="#/settings/shortcut"><Icon name="link" /><span class="grow">Shortcut &amp; NFC setup</span><Icon name="chevron" size={18} /></a>
             <a class="list-row list-link" href="#/settings/taps"><Icon name="tag" /><span class="grow">NFC tap log</span><Icon name="chevron" size={18} /></a>
@@ -32,8 +36,11 @@ export function Settings() {
             </a>
           </div>
         </section>
+        <HealthSection />
         <ToolsSection />
-        <p class="faint small" style={{ textAlign: 'center' }}>Planner · milestone 1 · {isStandalone() ? 'installed' : 'in browser — Share → Add to Home Screen to install'}</p>
+        <p class="faint small" style={{ textAlign: 'center' }}>
+          {version ? `Planner ${version}` : 'planner'} · {isStandalone() ? 'installed' : 'in browser — Share → Add to Home Screen to install'}
+        </p>
       </main>
     </>
   )
@@ -41,6 +48,88 @@ export function Settings() {
 
 function isStandalone(): boolean {
   try { return matchMedia('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true } catch { return false }
+}
+
+// The Worker's APP_VERSION from the public GET /api/health, fetched once per page load (undefined = not asked yet).
+let versionCache: string | null | undefined
+function useWorkerVersion(): string | null {
+  const [v, setV] = useState<string | null>(versionCache ?? null)
+  useEffect(() => {
+    if (versionCache !== undefined) { setV(versionCache); return }
+    let alive = true
+    void fetch('/api/health', { cache: 'no-store', headers: { Accept: 'application/json' } })
+      .then((r) => (r.ok ? (r.json() as Promise<unknown>) : null))
+      .then((j) => {
+        const ver = j && typeof j === 'object' && typeof (j as { version?: unknown }).version === 'string' ? (j as { version: string }).version : null
+        versionCache = ver
+        if (alive) setV(ver)
+      })
+      .catch(() => { versionCache = null })
+    return () => { alive = false }
+  }, [])
+  return v
+}
+
+// ---- automation health -----------------------------------------------------------------------------
+
+const SOURCE_NAMES: Record<string, string> = { mac: 'Mac screen-time push', phone: 'Phone screen time', nfc: 'NFC stickers', cron: 'Nightly rollup', cli: 'CLI' }
+
+/** ok = the last success is newer than the last error; error = the other way round; never = no success yet. */
+export function healthTone(r: Pick<HealthRow, 'last_ok_at' | 'last_error_at'>): 'ok' | 'error' | 'never' {
+  if (r.last_error_at && (!r.last_ok_at || r.last_error_at > r.last_ok_at)) return 'error'
+  return r.last_ok_at ? 'ok' : 'never'
+}
+
+/** The automation_health rows the Today payload carries, laid out like `planner health`. */
+function HealthSection() {
+  const p = today.value
+  const at = now.value
+  if (!p) return null
+  const rows = p.health.rows
+  return (
+    <section class="card" aria-label="Automation health">
+      <div class="card-head">
+        <span class="card-title">Automation health</span>
+        <span class="small faint num">{p.health.taps_today} tap{p.health.taps_today === 1 ? '' : 's'} today</span>
+      </div>
+      {rows.length === 0 ? (
+        <p class="small faint">Nothing has reported yet: the Mac push, the stickers and the nightly rollup each add a row here.</p>
+      ) : (
+        <div class="list">
+          {rows.map((r) => {
+            const tone = healthTone(r)
+            return (
+              <div key={r.source} class="list-row health-row">
+                <div class="grow">
+                  <div class="health-src">{SOURCE_NAMES[r.source] ?? r.source}</div>
+                  <div class="small faint">
+                    {r.last_ok_at ? `last ok ${agoLabel(r.last_ok_at, at)}` : 'never ok'}{r.detail ? ` · ${r.detail}` : ''}
+                  </div>
+                  {r.last_error_at && (
+                    <div class="small health-err">error {agoLabel(r.last_error_at, at)}{r.last_error ? `: ${r.last_error}` : ''}</div>
+                  )}
+                </div>
+                <span class={`badge ${tone === 'ok' ? 'badge-ok' : tone === 'error' ? 'badge-danger' : ''}`}>{tone}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/** Hand a JSON text to the browser as a file (a blob link; nothing is kept in storage). */
+function downloadJson(name: string, text: string): void {
+  const blob = new Blob([text], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 function TokenSection() {
@@ -238,6 +327,20 @@ function ToolsSection() {
       toast(outbox.lastError.value ? `Sync failed: ${outbox.lastError.value}` : 'Synced', outbox.lastError.value ? { kind: 'danger' } : {})
     } finally { setBusy(null) }
   }
+  // GET /api/export (every table, capped per table) straight to a file; the token travels only in the header.
+  const exportData = async () => {
+    const t = token.value
+    if (!t) { toast('Paste the app token first', { kind: 'danger' }); return }
+    setBusy('data')
+    try {
+      const r = await fetch('/api/export', { headers: { Authorization: `Bearer ${t}`, Accept: 'application/json' }, cache: 'no-store' })
+      if (!r.ok) { toast(r.status === 401 ? 'Token rejected' : r.status === 403 ? 'Token has the wrong role' : `Export failed (${r.status})`, { kind: 'danger' }); return }
+      downloadJson(`planner-export-${new Date().toISOString().slice(0, 10)}.json`, await r.text())
+      toast('Export downloaded')
+    } catch {
+      toast('Cannot reach the server', { kind: 'danger' })
+    } finally { setBusy(null) }
+  }
   const exportCache = async () => {
     setBusy('export')
     try {
@@ -245,15 +348,7 @@ function ToolsSection() {
       const local: Record<string, string | null> = {}
       try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k !== 'planner.token') local[k] = localStorage.getItem(k) } } catch { /* ignore */ }
       const dump = { exported_at: new Date().toISOString(), idb: idb.filter(([k]) => k !== 'planner.token').map(([k, v]) => ({ key: String(k), value: v })), localStorage: local }
-      const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `planner-cache-${new Date().toISOString().slice(0, 10)}.json`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+      downloadJson(`planner-cache-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(dump, null, 2))
     } finally { setBusy(null) }
   }
   const reset = async () => {
@@ -270,9 +365,10 @@ function ToolsSection() {
   }
   return (
     <section class="card" aria-label="Tools">
-      <div class="card-head"><span class="card-title">Local data</span><span class="small faint num">{outbox.pending.value} pending</span></div>
+      <div class="card-head"><span class="card-title">Data</span><span class="small faint num">{outbox.pending.value} pending</span></div>
       <div class="stack-sm">
         <button type="button" class="btn btn-block" onClick={force} disabled={busy !== null}><Icon name="refresh" size={18} class={busy === 'sync' ? 'spin' : undefined} /> Force sync</button>
+        <button type="button" class="btn btn-block" onClick={exportData} disabled={busy !== null}><Icon name="copy" size={18} /> Export data</button>
         <button type="button" class="btn btn-block" onClick={exportCache} disabled={busy !== null}>Export cache</button>
         <button type="button" class="btn btn-danger btn-block" onClick={reset} disabled={busy !== null}>Reset local cache</button>
       </div>

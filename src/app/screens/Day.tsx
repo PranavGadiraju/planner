@@ -1,7 +1,9 @@
-// Day tab: a Day | Week | Month switch (remembered in localStorage; the route stays '#/day[/YYYY-MM-DD]').
-// Day: the 24-hour ribbon for one date. Header with prev/next and a Today pill, a category strip, then a
-// 1 px = 1 minute timeline with tappable blocks (detail sheet; manual blocks can be edited or deleted) and hatched
-// Unknown gaps (Fill sheet -> a time_blocks row through the outbox, patched in optimistically).
+// Day tab: a Day | Week | Month switch. The hash carries the view: '#/day/YYYY-MM-DD' is always that day's
+// timeline, '#/day/week[/date]' and '#/day/month[/date]' the period views, and the bare '#/day' (the tab bar)
+// opens whichever view the switch last picked (remembered in localStorage).
+// Day: the 24-hour ribbon for one date. Header with prev/next, a Today pill and refresh, a category strip, then
+// a 1 px = 1 minute timeline with tappable blocks (detail sheet; manual blocks can be edited or deleted) and
+// hatched Unknown gaps (Fill sheet -> a time_blocks row through the outbox, patched in optimistically).
 // Week and Month (M7) live in ./day/Week.tsx and ./day/Month.tsx and read /api/summary.
 import type { ComponentChildren } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
@@ -14,15 +16,19 @@ import { Icon } from '../components/Icon'
 import { SyncDot } from '../components/TopBar'
 import { toast } from '../components/Toast'
 import { navigate, route } from '../router'
+import { seenLabel } from '../data/apps'
 import { dayLabel, hhmm, uuid } from '../data/format'
 import { localToday, now, syncState } from '../data/store'
 import { dayHash, dayState, loadDay, watchDay, type DayPayload } from '../data/day'
-import { SHORT_LABELS, blockColor, gapNeighbours, hm, minuteOf, ringSummary, stripSegments, titleCase, toBlockCategory } from '../data/daymath'
+import {
+  SHORT_LABELS, blockApps, blockColor, gapNeighbours, hm, minuteOf, nearestStudyProject, ringSummary, stripSegments, titleCase, toBlockCategory,
+} from '../data/daymath'
 import * as outbox from '../data/outbox'
-import { ViewSwitch, readView, saveView, type View } from './day/shared'
+import { FreshnessFoot, ViewRow, ViewSwitch, readView, saveView, type View } from './day/shared'
 import { WeekView } from './day/Week'
 import { MonthView } from './day/Month'
 import '../styles/summary.css'
+import '../styles/work.css'
 
 const LABEL_MIN_PX = 28
 const MORNING_MIN = 7 * 60
@@ -34,11 +40,18 @@ export function Day() {
   const r = route.value
   const todayStr = localToday.value
   const date = r.name === 'day' && r.date ? r.date : todayStr
-  const [view, setView] = useState<View>(readView)
-  const change = (v: View) => { saveView(v); setView(v) }
+  // The bare '#/day' shows the remembered view; kept in state too so picking it in the switch re-renders even
+  // when the hash does not change.
+  const [remembered, setRemembered] = useState<View>(readView)
+  const view: View = r.name === 'day' && r.view ? r.view : remembered
+  const change = (v: View) => {
+    saveView(v)
+    setRemembered(v)
+    navigate(v === 'day' && date === todayStr ? '#/day' : dayHash(date, v))
+  }
   const switcher = <ViewSwitch view={view} onChange={change} />
-  if (view === 'week') return <WeekView date={date} today={todayStr} switcher={switcher} onOpenDay={(d) => { change('day'); navigate(dayHash(d)) }} />
-  if (view === 'month') return <MonthView date={date} today={todayStr} switcher={switcher} onOpenDay={(d) => { change('day'); navigate(dayHash(d)) }} />
+  if (view === 'week') return <WeekView date={date} today={todayStr} switcher={switcher} onOpenDay={(d) => navigate(dayHash(d))} />
+  if (view === 'month') return <MonthView date={date} today={todayStr} switcher={switcher} onOpenDay={(d) => navigate(dayHash(d))} />
   return <DayView date={date} todayStr={todayStr} switcher={switcher} />
 }
 
@@ -78,7 +91,7 @@ function DayView({ date, todayStr, switcher }: { date: string; todayStr: string;
           </button>
           <SyncDot />
         </div>
-        <div class="view-row">{switcher}</div>
+        <ViewRow switcher={switcher} onRefresh={() => void loadDay(date)} refreshing={state.loading} />
       </header>
       <main class="content fade day-content">
         {(sync === 'no-token' || sync === 'unauthorized') && (
@@ -104,6 +117,7 @@ function DayView({ date, todayStr, switcher }: { date: string; todayStr: string;
           />
         )}
         {data && <p class="small faint day-foot">{data.sleep_inferred ? 'Sleep? is a guess until the wake time is set on Today. ' : ''}Tap a block for details, a hatched gap to fill it in.</p>}
+        {data && <FreshnessFoot today={todayStr} />}
       </main>
       {selected && data && (
         <BlockSheet
@@ -282,6 +296,7 @@ function BlockSheet({ block, data, onClose, onEdit, onDelete }: {
   const manual = block.source === 'manual'
   const row = manual ? rowFor(data, block) : null
   const project = block.category === 'study' && block.sub ? data.projects.find((p) => p.id === block.sub) : null
+  const apps = blockApps(block)
   return (
     <Sheet title={block.label} sub={`${CATEGORY_LABELS[block.category]} · ${SOURCE_LABELS[block.source] ?? block.source}`} onClose={onClose}>
       <div class="stack">
@@ -294,6 +309,19 @@ function BlockSheet({ block, data, onClose, onEdit, onDelete }: {
           {project && <><dt>Project</dt><dd>{project.name}</dd></>}
           <dt>Exact</dt><dd class="num small">{block.start.slice(11, 19)}Z – {block.end.slice(11, 19)}Z</dd>
         </dl>
+        {apps.length > 0 && (
+          <div class="field">
+            <span class="label">Mac apps in this block</span>
+            <ul class="block-apps" aria-label="Mac apps in this block">
+              {apps.map((a) => (
+                <li key={a.label} class="block-app">
+                  <span class="grow block-app-name">{a.label}</span>
+                  <span class="num small faint">{seenLabel(a.seconds)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {block.source === 'sleep?' && (
           <div class="banner">
             <span class="grow small">The wake time is not confirmed, so this block guesses 8 h. Set it on Today.</span>
@@ -306,7 +334,7 @@ function BlockSheet({ block, data, onClose, onEdit, onDelete }: {
             <button type="button" class="btn btn-big btn-danger" onClick={() => onDelete(row)}><Icon name="trash" size={18} /> Delete</button>
           </div>
         )}
-        {manual && !row && <p class="small faint">This block can be edited once its row has synced. Pull to refresh in a moment.</p>}
+        {manual && !row && <p class="small faint">This block can be edited once its row has synced; the day refreshes on its own in a moment.</p>}
       </div>
     </Sheet>
   )
@@ -318,8 +346,12 @@ function FillSheet({ target, data, onClose }: { target: FillTarget; data: DayPay
   const tz = data.tz
   const editing = target.row ?? null
   const nb = target.gap ? gapNeighbours(data, target.gap) : { prev: null, next: null }
+  const projects = data.projects
+  const knownProject = (id: string | null | undefined) => (id && projects.some((p) => p.id === id) ? id : null)
   const [cat, setCat] = useState<BlockCategory>(editing?.category ?? 'other')
   const [label, setLabel] = useState(editing?.label ?? '')
+  // Study blocks carry a project: the row's own when editing, else the day's nearest study block's, else none.
+  const [projectId, setProjectId] = useState<string | null>(() => knownProject(editing ? editing.project_id : nearestStudyProject(data, target.start, target.end)))
   const [start, setStart] = useState(localHHMM(target.start, tz))
   const [end, setEnd] = useState(localHHMM(target.end, tz))
   const [busy, setBusy] = useState(false)
@@ -327,6 +359,7 @@ function FillSheet({ target, data, onClose }: { target: FillTarget; data: DayPay
   const copy = (b: Block) => {
     setCat(toBlockCategory(b.category))
     setLabel(b.label === titleCase(b.category) ? '' : b.label)
+    if (b.category === 'study') setProjectId(knownProject(b.sub))
   }
   const save = async () => {
     if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) { toast('Set both times', { kind: 'danger' }); return }
@@ -338,7 +371,7 @@ function FillSheet({ target, data, onClose }: { target: FillTarget; data: DayPay
     const row: TimeBlock = {
       id: editing?.id ?? uuid(),
       start_ts: s.toISOString(), end_ts: e.toISOString(),
-      category: cat, label: label.trim() || null, project_id: editing?.project_id ?? null,
+      category: cat, label: label.trim() || null, project_id: cat === 'study' ? projectId : null,
       source: 'app', created_at: editing?.created_at ?? ts, updated_at: ts, deleted_at: null,
     }
     setBusy(true)
@@ -372,6 +405,25 @@ function FillSheet({ target, data, onClose }: { target: FillTarget; data: DayPay
             ))}
           </div>
         </div>
+        {cat === 'study' && (
+          <div class="field">
+            <span class="label">Project</span>
+            {projects.length === 0 ? (
+              <p class="small faint">No projects yet; add one in Work to attribute study time.</p>
+            ) : (
+              <div class="chips" role="group" aria-label="Project">
+                <button type="button" class="chip chip-proj" aria-pressed={projectId === null} style="--c:var(--cat-other)" onClick={() => setProjectId(null)}>
+                  <i class="pdot" />None
+                </button>
+                {projects.map((p) => (
+                  <button key={p.id} type="button" class="chip chip-proj" aria-pressed={projectId === p.id} style={`--c:${p.color ?? 'var(--cat-study)'}`} onClick={() => setProjectId(p.id)}>
+                    <i class="pdot" />{p.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <div class="field">
           <label for="fill-label">Label <span class="faint">(optional)</span></label>
           <input id="fill-label" type="text" value={label} placeholder={CATEGORY_LABELS[cat]} onInput={(e) => setLabel((e.currentTarget as HTMLInputElement).value)} enterkeyhint="done" autocomplete="off" />

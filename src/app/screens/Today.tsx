@@ -102,7 +102,7 @@ function DayRingCard({ day }: { day: string }) {
   const { known, unknown } = d ? ringSummary(d.totals) : { known: 0, unknown: 0 }
   const keys = d ? stripSegments(d.totals).filter((x) => x.category !== 'unknown').sort((a, b) => b.minutes - a.minutes).slice(0, 4) : []
   return (
-    <a class="card ring-card" href="#/day" aria-label={`Day ring: ${hm(known)} tracked, ${hm(unknown)} unknown. Open the day view`}>
+    <a class="card ring-card" href={`#/day/${day}`} aria-label={`Day ring: ${hm(known)} tracked, ${hm(unknown)} unknown. Open today's timeline`}>
       <div class="ring-row">
         <DayRing hours={hours} size={150} center={{ big: hm(known), small: 'tracked' }} />
         <div class="ring-legend">
