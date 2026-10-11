@@ -82,6 +82,9 @@ export function RoutineEditor() {
               <button type="button" class="icon-btn" style={{ width: 40, height: 40 }} onClick={() => move(idx, 1)} disabled={idx === rows.length - 1} aria-label="Move down"><Icon name="down" size={18} /></button>
             </div>
             <div class="stack-sm">
+              {r.id === 'personal-work' && <p class="small muted">Repeatable NFC timer · each completed pair becomes a separate Work session.</p>}
+              {r.id === 'vitamins' && <p class="small muted">One-tap checkoff · no second tap needed.</p>}
+              {r.id === 'workday' && <p class="small muted">Long timer · leaving starts it and returning stops it.</p>}
               <div class="row">
                 <input class="grow" type="text" value={r.name} onInput={(e) => update(r.id, { name: (e.currentTarget as HTMLInputElement).value })} aria-label="Name" placeholder="Name" />
                 <input type="number" inputMode="numeric" min={1} max={600} value={String(r.default_min)} style={{ width: 84 }} onInput={(e) => update(r.id, { default_min: Number((e.currentTarget as HTMLInputElement).value) })} aria-label="Default minutes" />

@@ -140,7 +140,7 @@ export function buildDay(input: DayInput): DayResult {
     const item = items.get(r.item_id)
     const defMin = item?.default_min ?? 10
     const end = r.ended_at ?? new Date(new Date(r.started_at).getTime() + defMin * 60000).toISOString()
-    const cat: ChartCategory = item?.chart_category === 'workout' ? 'workout' : 'routine'
+    const cat: ChartCategory = r.item_id === 'workday' ? 'study' : item?.chart_category === 'workout' ? 'workout' : 'routine'
     fill(r.started_at, end, cat, item?.name ?? r.item_id, r.item_id, 'routine')
   }
 

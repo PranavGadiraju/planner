@@ -1,4 +1,4 @@
-// The exact recipe for the "Planner Tap" Shortcut, the six NFC automations and the wind-down reminder.
+// The exact recipe for the shared "Planner Tap" Shortcut, its NFC automations and the wind-down reminder.
 import { SubBar } from '../components/TopBar'
 import { Icon } from '../components/Icon'
 import { toast } from '../components/Toast'
@@ -41,7 +41,11 @@ export function ShortcutSetup() {
             <button type="button" class="chip" onClick={() => copy('wake', 'wake')}><span class="mono">wake</span><span class="faint small">optional</span></button>
             <button type="button" class="chip" onClick={() => copy('winddown', 'winddown')}><span class="mono">winddown</span><span class="faint small">reminder</span></button>
           </div>
-          <p class="small muted" style={{ marginTop: '10px' }}>Routine tags: first tap starts, second tap (3+ min later) finishes. The first routine tap of the morning also marks you awake.</p>
+          <div class="stack-sm" style={{ marginTop: '10px' }}>
+            <p class="small muted"><strong>Timers:</strong> first tap starts; second tap (3+ min later) stops.</p>
+            <p class="small muted"><code>personal-work</code> is repeatable: every completed pair creates a separate Work session, and the next tap starts a new one.</p>
+            <p class="small muted"><code>vitamins</code> checks off immediately with one tap. <code>workday</code> can stay open for up to 18 hours.</p>
+          </div>
         </section>
 
         <section class="card">
@@ -53,17 +57,21 @@ export function ShortcutSetup() {
             <li>Add <strong>Get Dictionary Value</strong>: get value for key <code>ok</code> in <em>Contents of URL</em>.</li>
             <li>Add <strong>If</strong>: <em>Dictionary Value</em> <code>is</code> <code>true</code> → inside (optional): <strong>Get Dictionary Value</strong> for key <code>message</code> → <strong>Show Notification</strong> with it, e.g. "Run done · 41 min".</li>
             <li>In the <em>Otherwise</em> branch: <strong>Show Notification</strong> <code>Planner failed: [Shortcut Input]</code>. (Get Contents of URL does not fail on a 4xx body, and a missing value never satisfies "is true", so a bad token, a typo or a non-JSON reply always lands here.)</li>
-            <li>Run it once by hand with input <code>shower</code> and choose <strong>Always Allow</strong> for the network request. Then check the tap log here.</li>
+            <li>Run it once by hand with input <code>vitamins</code> and choose <strong>Always Allow</strong> for the network request. Then check the tap log here.</li>
           </ol>
         </section>
 
         <section class="card">
-          <div class="card-head"><span class="card-title">2 · Six NFC automations</span></div>
+          <div class="card-head"><span class="card-title">2 · Your NFC automations</span></div>
           <ol class="steps">
             <li>Shortcuts → <strong>Automation</strong> → <strong>+</strong> → <strong>NFC</strong> → <strong>Scan</strong> the sticker and name it after its slug.</li>
             <li>Choose <strong>Run Immediately</strong> and turn on <strong>Notify When Run</strong> for the first week.</li>
-            <li>Action: <strong>Run Shortcut</strong> → <code>Planner Tap</code> with <strong>Input</strong> set to the slug text, e.g. <code>shower</code>.</li>
-            <li>Repeat for <code>{items.map((i) => i.id).concat('bed').join('</code>, <code>')}</code>. Shortcuts keys on the tag UID, so every sticker needs its own automation.</li>
+            <li>Action: <strong>Run Shortcut</strong> → <code>Planner Tap</code> with <strong>Input</strong> set to the slug text, e.g. <code>morning-workout</code>.</li>
+            <li>
+              Repeat for {items.map((i, index) => (
+                <span key={i.id}>{index > 0 && ', '}<code>{i.id}</code></span>
+              ))}. Shortcuts keys on the tag UID, so every sticker needs its own automation.
+            </li>
             <li>Gesture: raise the phone (Face ID), touch the top edge to the sticker for about a second; nothing opens. The screen must be on and the phone unlocked once since boot.</li>
           </ol>
         </section>

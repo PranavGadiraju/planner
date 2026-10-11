@@ -3,7 +3,7 @@
 import { useRef } from 'preact/hooks'
 import type { RoutineItem, RoutineLog } from '@shared/types'
 import { Icon, routineIconName } from './Icon'
-import { routineIsDone } from '@shared/routine'
+import { routineIsDone, routineTapOptions } from '@shared/routine'
 import { elapsedLabel, hhmm, shortName } from '../data/format'
 
 const R = 26
@@ -12,9 +12,9 @@ const LONG_PRESS_MS = 500
 
 export type CircleState = 'idle' | 'running' | 'done'
 
-export function circleState(log: RoutineLog | undefined, now: Date = new Date()): CircleState {
+export function circleState(log: RoutineLog | undefined, now: Date = new Date(), itemId = ''): CircleState {
   if (!log || log.deleted_at) return 'idle'
-  return routineIsDone(log, now) ? 'done' : 'running'
+  return routineIsDone(log, now, routineTapOptions(itemId)) ? 'done' : 'running'
 }
 
 export function RoutineCircle({ item, log, tz, now, onTap, onLongPress }: {
@@ -27,7 +27,7 @@ export function RoutineCircle({ item, log, tz, now, onTap, onLongPress }: {
 }) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fired = useRef(false)
-  const state = circleState(log, now)
+  const state = circleState(log, now, item.id)
 
   const clear = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null } }
   const down = () => {

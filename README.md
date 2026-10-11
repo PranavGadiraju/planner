@@ -98,7 +98,7 @@ Checks: `npm run typecheck` (app and worker tsconfigs), `npm test` (vitest). Try
 
 ```sh
 curl -s localhost:8787/api/health
-curl -s -X POST localhost:8787/api/tap -H 'Authorization: Bearer dev-shortcut' -H 'content-type: application/json' -d '{"item":"shower"}'
+curl -s -X POST localhost:8787/api/tap -H 'Authorization: Bearer dev-shortcut' -H 'content-type: application/json' -d '{"item":"morning-workout"}'
 PLANNER_URL=http://localhost:8787 PLANNER_TOKEN=dev-app node bin/planner today
 PLANNER_URL=http://localhost:8787 PLANNER_TOKEN=dev-app node bin/planner day today
 ```
@@ -114,8 +114,9 @@ token role and stops it again; run it after touching the Worker.
 
 A 10-pack of plain **NXP NTAG213** (or NTAG215) **25 mm PET stickers**, about $5-10. Do **not** write anything to
 them: the Shortcuts NFC trigger keys on the tag's hardware UID and ignores the contents. Use the ferrite "on-metal"
-variety only where a sticker goes on metal (a shower rail, a barbell rack). You need six: shower, run, stretch,
-shoulders, journal, and one for the nightstand (bed).
+variety only where a sticker goes on metal (a treadmill or weight rack). The first NFC set is: morning workout,
+morning stretch, shoulder exercise, leaving/returning from work, evening workout, walking treadmill, personal
+work, and vitamins.
 
 ### The one Shortcut: "Planner Tap"
 
@@ -128,30 +129,34 @@ Create it once; every sticker automation calls it with a different input, so the
 3. Add **Get Dictionary Value**: key `ok` from **Contents of URL**.
 4. Add **If**: *Dictionary Value* **is** *true* (booleans show as a toggle; make sure it reads "is true", not
    "is not true"). Inside the If, optionally: **Get Dictionary Value** key `message` from Contents of URL, then
-   **Show Notification** with that value ("Shower started 07:42", "Morning run done · 41 min",
-   "In bed 23:20 (+20 min) · streak 4").
+   **Show Notification** with that value ("Morning workout started 07:42", "Walking treadmill done · 41 min",
+   or "Vitamins checked off").
 5. In the **Otherwise** branch: **Show Notification** with title `Planner failed` and body `Shortcut Input`, so it
-   reads "Planner failed: shower". The condition is deliberately *is true* rather than *is not true*: a 401 body
+   reads "Planner failed: vitamins". The condition is deliberately *is true* rather than *is not true*: a 401 body
    has no `ok` key at all, a non-JSON answer has no dictionary, and a missing or empty value would not satisfy
    "is not true" on every iOS version, whereas it never satisfies "is true", so every failure lands in Otherwise.
    Get Contents of URL does not fail on a 4xx/401 body, it just returns it; this notification is the only way a
    broken token, a typo in a slug, or a Worker error is visible.
-6. Run it once manually (play button, type `shower` when asked for input). When iOS asks to allow the shortcut to
+6. Run it once manually (play button, type `vitamins` when asked for input). When iOS asks to allow the shortcut to
    send data to your Worker, choose **Always Allow**. Check the tap landed: `planner taps` or Settings >
    **NFC tap log** (`#/settings/taps`).
 
-### Six NFC automations
+### NFC automations
 
-For each of `shower`, `run`, `stretch`, `shoulders`, `journal`, `bed`:
+Create one for each of `morning-workout`, `morning-stretch`, `shoulders`, `workday`, `evening-workout`,
+`treadmill`, `personal-work`, and `vitamins`:
 
 1. Shortcuts > **Automation** tab > **+** > **NFC** > **Scan**: hold the top edge of the iPhone against the sticker
    until it is recognised; name it after the slug; **Next**.
 2. Choose **Run Immediately** (this is "Ask Before Running" off; tap **Don't Ask** if a confirmation appears) and
    turn **Notify When Run** **on** for the first week so you see the small banner each time it fires. **Next**.
 3. Action: **Run Shortcut** > **Planner Tap** > tap **Show More** / the input field and set **Input** to the text
-   slug (`shower`, `run`, ..., `bed`). **Done**.
+   slug (`morning-workout`, `vitamins`, etc.). **Done**.
 
-Slugs must match `routine_items.id` (the seeded five above) or the special items `bed`, `wake`, `winddown`.
+Normal timers use the first tap to start and the second tap (3+ minutes later) to stop. `workday` supports an
+18-hour span. `personal-work` is repeatable: every completed tap pair creates its own Work session, and the next
+tap starts another. `vitamins` checks off immediately with one tap. Slugs must match `routine_items.id` or the
+special sleep items `bed`, `wake`, `winddown`.
 Settings > **Routine items** (`#/settings/routine`) shows each item's slug next to its name (a slug cannot change
 after creation); Settings > **Shortcut & NFC setup** (`#/settings/shortcut`) repeats this recipe with your URL
 filled in and a copy button for the URL and every slug.
@@ -162,7 +167,7 @@ once since boot; tag reading pauses while Camera, Wallet/Apple Pay, another NFC 
 Whether a locked-but-awake phone runs the network action is disputed, so test it once; plan on "raise, then tap".
 
 **After every iOS update, open each automation and re-check that it still says Run Immediately** (updates have
-flipped automations back to "Ask"). Personal automations do not sync via iCloud: recreate all six on a new iPhone.
+flipped automations back to "Ask"). Personal automations do not sync via iCloud: recreate them on a new iPhone.
 
 ### Wind-down reminder (Time of Day automation)
 
@@ -312,7 +317,7 @@ Exit codes: 0 ok, 1 error (cannot reach the Worker, 401/403, server error), 2 us
 | `401` from the app, CLI or Shortcut | the token does not match the Worker secret; re-paste it (Settings, Keychain `planner-app-token`, or the Shortcut header). Secrets set with `wrangler secret put` take effect on the next request |
 | `403` | right token, wrong route: the Shortcut token may only call `/api/tap`, the Mac token only `/api/screentime` |
 | `404` from the Mac script | the URL in the plist is wrong (`PLANNER_URL` should be the site root, without `/api/...`) |
-| "Planner failed: shower" notification on the phone | the Worker did not answer `ok: true`. Run `planner taps` (or open Settings > NFC tap log): a 400 leaves a tap_log row with result `unknown_item`, so the log shows exactly which slug the Shortcut sent; compare it with the slugs in Settings > Routine items. No new row at all means the request never got past auth: a 401 (re-paste `SHORTCUT_TOKEN` in the Shortcut's header), a wrong URL, or no network |
+| "Planner failed: vitamins" notification on the phone | the Worker did not answer `ok: true`. Run `planner taps` (or open Settings > NFC tap log): a 400 leaves a tap_log row with result `unknown_item`, so the log shows exactly which slug the Shortcut sent; compare it with the slugs in Settings > Routine items. No new row at all means the request never got past auth: a 401 (re-paste `SHORTCUT_TOKEN` in the Shortcut's header), a wrong URL, or no network |
 | A sticker tap does nothing at all | Notify When Run on? Screen on and phone unlocked once since boot? Camera/Wallet closed? Open the automation: after an iOS update it may say "Ask Before Running" again |
 | Second tap says "Already done" / "duplicate" | taps < 2 min apart are duplicates, 2-3 min are ignored, >= 3 min finish the item; edit or undo from Today |
 | `Operation not permitted` / `authorization denied` reading knowledgeC.db | Full Disk Access is not applied to `/usr/bin/python3`; drag it into the FDA list again and run the verification one-liner; Terminal needs FDA too for manual tests (relaunch it after granting) |
@@ -393,11 +398,10 @@ the CLI.
 
 **Why a routine block uses the default minutes until the second tap.** The first sticker tap only records
 `started_at`. Rather than growing minute by minute or not appearing at all, the block is drawn as
-`started_at + default_min` (the item's default in Settings > Routine items: 15 for the shower, 40 for the run,
-10 for the rest) so the timeline is useful right away. The second tap, 3 or more minutes later, sets `ended_at`
-and the block snaps to the real duration ("Morning run done · 41 min"). If you never tap again the default stands,
+`started_at + default_min` (the item's default in Settings > Routine items) so the timeline is useful right away.
+The second tap, 3 or more minutes later, sets `ended_at` and the block snaps to the real duration. If you never tap again the default stands,
 which is usually close enough; long-press the circle on Today to correct either time. Items whose
-`chart_category` is `workout` (the run) count as workout minutes, the rest as routine.
+`chart_category` is `workout` count as workout minutes; `workday` counts as work/study time; the rest count as routine.
 
 **Sleep on the chart.** A closed night is painted from `bed_ts` to `wake_ts`. An open night (nightstand tap, no
 wake yet) is painted up to now for the first 14 hours; after that it becomes an 8-hour "Sleep?" guess with

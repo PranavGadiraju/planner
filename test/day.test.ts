@@ -84,6 +84,14 @@ describe('precedence', () => {
     expect(r.totals.workout_s).toBe(41 * 60) // run counts as workout
     expect(r.totals.routine_s).toBe(15 * 60)
   })
+  it('the workday NFC timer is shown as work/study time', () => {
+    const inp = base(DAY, NEXT)
+    inp.routine_items.push({ id: 'workday', name: 'Away at work', icon: 'work', position: 3, default_min: 480, chart_category: 'routine', active: 1, updated_at: '', deleted_at: null })
+    inp.routine_log = [{ local_day: DAY, item_id: 'workday', started_at: local(DAY, '08:30'), ended_at: local(DAY, '17:00'), source: 'nfc', updated_at: '', deleted_at: null }]
+    const r = buildDay(inp)
+    expect(r.totals.study_s).toBe(8.5 * 3600)
+    expect(r.blocks.find((b) => b.category === 'study')?.label).toBe('Away at work')
+  })
 })
 
 describe('screen time placement', () => {

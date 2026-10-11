@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'preact/hooks'
 import type { RoutineItem, RoutineLog } from '@shared/types'
 import { localDay, zonedToUTC } from '@shared/tz'
-import { routineIsDone } from '@shared/routine'
+import { routineIsDone, routineTapOptions } from '@shared/routine'
 import { TopBar } from '../components/TopBar'
 import { RoutineCircle } from '../components/RoutineCircle'
 import { SleepCard } from '../components/SleepCard'
@@ -131,7 +131,10 @@ function RoutineCard({ p, day, at, onTap, onLongPress }: {
   onLongPress: (item: RoutineItem) => void
 }) {
   const logs = new Map(p.routine_log.filter((r) => r.local_day === day && !r.deleted_at).map((r) => [r.item_id, r]))
-  const done = p.routine_items.filter((i) => { const l = logs.get(i.id); return l && routineIsDone(l, at) }).length
+  const done = p.routine_items.filter((i) => {
+    const l = logs.get(i.id)
+    return l && routineIsDone(l, at, routineTapOptions(i.id))
+  }).length
   return (
     <section class="card" aria-label="Morning routine">
       <div class="card-head">

@@ -7,7 +7,7 @@
 import { batch, computed, effect, signal } from '@preact/signals'
 import type { Project, RoutineItem, RoutineLog, Session, TodayPayload } from '@shared/types'
 import { addDays, dayWindow, localDay, localHHMM, weekStart, zonedToUTC } from '@shared/tz'
-import { routineIsDone } from '@shared/routine'
+import { routineIsDone, routineTapOptions } from '@shared/routine'
 import { ApiError, apiGet, hasToken, readCache } from './api'
 import * as outbox from './outbox'
 import { loadToday, localToday, today, tz } from './store'
@@ -596,7 +596,7 @@ export function checkinSummary(p: CheckinInput, sessions: readonly SessionRow[],
     const logs = p.routine_log.filter((l) => l.local_day === day && !l.deleted_at)
     const done = p.routine_items.filter((i) => {
       const l = logs.find((x) => x.item_id === i.id)
-      return l ? routineIsDone(l as RoutineLog, at) : false
+      return l ? routineIsDone(l as RoutineLog, at, routineTapOptions(i.id)) : false
     }).length
     parts.push(`routine ${done}/${p.routine_items.length}`)
   }

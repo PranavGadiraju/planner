@@ -124,7 +124,7 @@ export interface AppCategoryRow { app_id: string; label: string | null; category
 
 // ---- /api/tap
 export type TapAction =
-  | 'routine_started' | 'routine_finished' | 'routine_duplicate' | 'routine_ignored' | 'routine_already_done'
+  | 'routine_started' | 'routine_checked' | 'routine_finished' | 'routine_duplicate' | 'routine_ignored' | 'routine_already_done'
   | 'bed' | 'bed_duplicate' | 'bed_ignored' | 'bed_daytime_ignored' | 'wake' | 'wake_duplicate' | 'nap_then_bed'
   | 'winddown' | 'unknown_item'
 export interface TapResponse {

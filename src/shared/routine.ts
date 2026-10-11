@@ -4,9 +4,32 @@ export const ROUTINE_DUP_MS = 2 * 60_000
 export const ROUTINE_FINISH_MS = 3 * 60_000
 /** After this long without a second tap the item counts as done (default minutes); a later tap changes nothing. */
 export const ROUTINE_MAX_MS = 3 * 3600_000
+/** A workday can legitimately run much longer than an ordinary routine timer. */
+export const LONG_ROUTINE_MAX_MS = 18 * 3600_000
 
-export type RoutineTapAction = 'routine_started' | 'routine_duplicate' | 'routine_ignored' | 'routine_finished' | 'routine_already_done'
+export type RoutineTapAction = 'routine_started' | 'routine_checked' | 'routine_duplicate' | 'routine_ignored' | 'routine_finished' | 'routine_already_done'
 export interface RoutineTapResult { action: RoutineTapAction; row: RoutineLog; changed: boolean }
+export interface RoutineTapOptions {
+  /** Finish immediately on the first tap (for vitamins and similar check-offs). */
+  check?: boolean
+  /** A finished pair may be followed by another start/finish pair on the same day. */
+  repeat?: boolean
+  /** Timers at or beyond this age are treated as implicitly done. */
+  maxMs?: number
+}
+
+/** Custom NFC behavior keyed by stable sticker slug. */
+export function routineTapOptions(itemId: string): RoutineTapOptions {
+  if (itemId === 'vitamins') return { check: true }
+  if (itemId === 'personal-work') return { repeat: true, maxMs: 24 * 3600_000 }
+  if (itemId === 'workday') return { maxMs: LONG_ROUTINE_MAX_MS }
+  return {}
+}
+
+/** These modes are server-authoritative because they have special timing or also write Work sessions. */
+export function serverTapRoutine(itemId: string): boolean {
+  return itemId === 'vitamins' || itemId === 'personal-work' || itemId === 'workday'
+}
 
 /**
  * First tap of the day starts the item; a second tap >= 3 min later ends it; taps < 2 min apart are duplicates;
@@ -17,26 +40,28 @@ export function applyRoutineTap(
   existing: RoutineLog | null,
   now: Date,
   ctx: { local_day: string; item_id: string; source: Source },
+  options: RoutineTapOptions = {},
 ): RoutineTapResult {
   const nowIso = now.toISOString()
-  if (!existing || existing.deleted_at) {
+  if (!existing || existing.deleted_at || (options.repeat && existing.ended_at)) {
+    const checked = options.check === true
     return {
-      action: 'routine_started',
+      action: checked ? 'routine_checked' : 'routine_started',
       changed: true,
-      row: { local_day: ctx.local_day, item_id: ctx.item_id, started_at: nowIso, ended_at: null, source: ctx.source, updated_at: nowIso, deleted_at: null },
+      row: { local_day: ctx.local_day, item_id: ctx.item_id, started_at: nowIso, ended_at: checked ? nowIso : null, source: ctx.source, updated_at: nowIso, deleted_at: null },
     }
   }
   if (existing.ended_at) return { action: 'routine_already_done', row: existing, changed: false }
   const delta = now.getTime() - new Date(existing.started_at).getTime()
   if (delta < ROUTINE_DUP_MS) return { action: 'routine_duplicate', row: existing, changed: false }
   if (delta < ROUTINE_FINISH_MS) return { action: 'routine_ignored', row: existing, changed: false }
-  if (delta >= ROUTINE_MAX_MS) return { action: 'routine_already_done', row: existing, changed: false }
+  if (delta >= (options.maxMs ?? ROUTINE_MAX_MS)) return { action: 'routine_already_done', row: existing, changed: false }
   return { action: 'routine_finished', changed: true, row: { ...existing, ended_at: nowIso, updated_at: nowIso } }
 }
 
-/** True when a started item should be shown as done: it has an end, or it started more than 3 h ago. */
-export function routineIsDone(row: RoutineLog, now: Date): boolean {
-  return !!row.ended_at || now.getTime() - new Date(row.started_at).getTime() >= ROUTINE_MAX_MS
+/** True when a started item should be shown as done: it has an end, or it outlived its timer window. */
+export function routineIsDone(row: RoutineLog, now: Date, options: RoutineTapOptions = {}): boolean {
+  return !!row.ended_at || now.getTime() - new Date(row.started_at).getTime() >= (options.maxMs ?? ROUTINE_MAX_MS)
 }
 
 export function routineDurationMin(row: RoutineLog, defaultMin: number): number {

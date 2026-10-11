@@ -3,11 +3,11 @@
 import { batch, computed, effect, signal } from '@preact/signals'
 import { get, set } from 'idb-keyval'
 import { DEFAULT_SETTINGS } from '@shared/types'
-import type { Checkin, RoutineItem, RoutineLog, Settings, Sleep, TimeBlock, TodayPayload } from '@shared/types'
-import { applyRoutineTap, type RoutineTapAction } from '@shared/routine'
+import type { Checkin, RoutineItem, RoutineLog, Settings, Sleep, TapResponse, TimeBlock, TodayPayload } from '@shared/types'
+import { applyRoutineTap, serverTapRoutine, type RoutineTapAction } from '@shared/routine'
 import { OPEN_SLEEP_MAX_MS, applyBedTap, applyWake, nightOf, type BedTapAction } from '@shared/sleep'
 import { addDays, localDay } from '@shared/tz'
-import { ApiError, apiGet, authFailed, hasToken, offline, readCache, token } from './api'
+import { ApiError, apiGet, apiPost, authFailed, hasToken, offline, readCache, token } from './api'
 import * as outbox from './outbox'
 import { uuid } from './format'
 
@@ -201,6 +201,13 @@ export interface LocalTapResult { action: RoutineTapAction; message: string; wok
 export async function tapRoutineLocal(itemId: string): Promise<LocalTapResult> {
   const p = today.value
   if (!p) throw new Error('Today not loaded')
+  // These modes are handled by /api/tap so the website and NFC Shortcut use exactly the same logic. Personal
+  // work also creates/ends a real Work session, which cannot be represented by only a local routine-log row.
+  if (serverTapRoutine(itemId)) {
+    const res = await apiPost<TapResponse>('/api/tap', { item: itemId })
+    await loadToday()
+    return { action: res.action as RoutineTapAction, message: res.message, woke: res.message.includes('good morning') }
+  }
   const at = new Date()
   const day = localDay(at, p.tz)
   const item = p.routine_items.find((i) => i.id === itemId)
@@ -226,6 +233,7 @@ function tapMessage(action: RoutineTapAction, name: string, row: RoutineLog, tzN
   const t = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: tzName })
   switch (action) {
     case 'routine_started': return `${name} started ${t(row.started_at)}`
+    case 'routine_checked': return `${name} checked off`
     case 'routine_finished': {
       const min = Math.max(1, Math.round((new Date(row.ended_at ?? row.started_at).getTime() - new Date(row.started_at).getTime()) / 60000))
       return `${name} done · ${min} min`

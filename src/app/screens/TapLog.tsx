@@ -9,7 +9,7 @@ import { now, tz } from '../data/store'
 
 interface Tap { id: number; ts: string; item: string; role: string; result: string }
 
-const OK = new Set(['routine_started', 'routine_finished', 'bed', 'wake', 'nap_then_bed', 'winddown'])
+const OK = new Set(['routine_started', 'routine_checked', 'routine_finished', 'bed', 'wake', 'nap_then_bed', 'winddown'])
 const WARN = new Set(['routine_duplicate', 'routine_ignored', 'routine_already_done', 'bed_duplicate', 'bed_ignored', 'bed_daytime_ignored', 'wake_duplicate'])
 
 function badgeClass(result: string): string {

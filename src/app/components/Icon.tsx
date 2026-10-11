@@ -62,7 +62,11 @@ export function Icon({ name, size = 22, stroke = 1.75, class: cls }: { name: Ico
   )
 }
 
-const ROUTINE_ICONS: Record<string, IconName> = { shower: 'shower', run: 'run', stretch: 'stretch', shoulders: 'shoulders', journal: 'journal' }
+const ROUTINE_ICONS: Record<string, IconName> = {
+  shower: 'shower', run: 'run', stretch: 'stretch', shoulders: 'shoulders', journal: 'journal',
+  'morning-workout': 'lift', 'morning-stretch': 'stretch', workday: 'work', 'evening-workout': 'lift',
+  treadmill: 'run', 'personal-work': 'work', vitamins: 'check',
+}
 export function routineIconName(icon: string | null, id: string): IconName {
   return ROUTINE_ICONS[icon ?? ''] ?? ROUTINE_ICONS[id] ?? 'dot'
 }

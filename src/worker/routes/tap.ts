@@ -5,10 +5,10 @@ import { HttpError, isRecord, json, readJson } from '../http'
 import { parseSettings, SETTINGS_SQL, upsertFor } from '../db'
 import type { SettingsRow } from '../db'
 import { addDays, localDay, localHHMM } from '../../shared/tz'
-import { applyRoutineTap, routineDurationMin } from '../../shared/routine'
+import { applyRoutineTap, routineDurationMin, routineTapOptions } from '../../shared/routine'
 import { applyBedTap, applyWake, bedtimeStreak, nightOf, sleepDurationMin } from '../../shared/sleep'
 import type { BedTapResult } from '../../shared/sleep'
-import type { RoutineItem, RoutineLog, Sleep, Source, TapAction, TapResponse } from '../../shared/types'
+import type { RoutineItem, RoutineLog, Session, Sleep, Source, TapAction, TapResponse } from '../../shared/types'
 
 const SLEEP_HISTORY_SQL = 'SELECT * FROM sleep WHERE deleted_at IS NULL ORDER BY night_of DESC LIMIT 60'
 const TAP_DIRTY_SQL = 'INSERT INTO dirty_days (local_day, marked_at) VALUES (?, ?) ON CONFLICT(local_day) DO UPDATE SET marked_at = excluded.marked_at'
@@ -20,6 +20,12 @@ const NFC_REACHED_WITH_ERROR_SQL =
 const NFC_ERROR_SQL =
   "INSERT INTO automation_health (source, last_error_at, last_error) VALUES ('nfc', ?, ?) " +
   'ON CONFLICT(source) DO UPDATE SET last_error_at = excluded.last_error_at, last_error = excluded.last_error'
+const PERSONAL_WORK_ID = 'personal-work'
+const ENSURE_PERSONAL_WORK_PROJECT_SQL =
+  "INSERT INTO projects (id, name, kind, color, position, archived_at, created_at, updated_at, deleted_at) " +
+  "VALUES ('personal-work', 'Personal work', 'project', '#a855f7', 1, NULL, ?, ?, NULL) " +
+  "ON CONFLICT(id) DO UPDATE SET name = excluded.name, kind = excluded.kind, color = excluded.color, " +
+  "archived_at = NULL, updated_at = excluded.updated_at, deleted_at = NULL"
 
 interface TapBody { item: string; at: Date }
 
@@ -73,18 +79,22 @@ export async function tap(c: RouteContext): Promise<Response> {
   const night = nightOf(now, tz)
   const source: Source = role === 'shortcut' ? 'nfc' : 'app'
 
-  const [settingsR, sleepR, itemR, logR, countR] = await db.batch([
+  const [settingsR, sleepR, itemR, logR, countR, personalSessionR] = await db.batch([
     db.prepare(SETTINGS_SQL),
     db.prepare(SLEEP_HISTORY_SQL),
     db.prepare('SELECT * FROM routine_items WHERE lower(id) = ? AND active = 1 AND deleted_at IS NULL LIMIT 1').bind(key),
     db.prepare('SELECT * FROM routine_log WHERE local_day = ? AND lower(item_id) = ? LIMIT 1').bind(today, key),
     db.prepare('SELECT COUNT(*) AS n FROM routine_log WHERE local_day = ? AND deleted_at IS NULL').bind(today),
+    db.prepare(
+      'SELECT * FROM sessions WHERE project_id = ? AND ended_at IS NULL AND deleted_at IS NULL ORDER BY started_at DESC LIMIT 1',
+    ).bind(key === PERSONAL_WORK_ID ? PERSONAL_WORK_ID : ''),
   ])
   const settings = parseSettings((settingsR?.results ?? []) as SettingsRow[])
   const sleepRows = (sleepR?.results ?? []) as Sleep[]
   const routineItem = ((itemR?.results ?? []) as RoutineItem[])[0] ?? null
   const existingLog = ((logR?.results ?? []) as RoutineLog[])[0] ?? null
   const liveRoutineToday = Number(((countR?.results ?? []) as { n: number }[])[0]?.n ?? 0)
+  const openPersonalSession = ((personalSessionR?.results ?? []) as Session[])[0] ?? null
 
   const hhmm = (ts: string | null | undefined) => (ts ? localHHMM(ts, tz) : '?')
   const findNight = (n: string): Sleep | null => sleepRows.find((r) => r.night_of === n) ?? null
@@ -134,11 +144,42 @@ export async function tap(c: RouteContext): Promise<Response> {
     message = `Wind down · streak ${streakWith(null)}` + (last ? ` · last night ${lateText(last.late_min)}` : '')
   } else if (routineItem) {
     itemOut = routineItem.id
-    const r = applyRoutineTap(existingLog, now, { local_day: today, item_id: routineItem.id, source })
+    // The repeatable personal-work tag follows the real open Work session. This also recovers cleanly if a prior
+    // session was auto-closed overnight while its routine indicator still looked open.
+    const stateLog = key === PERSONAL_WORK_ID
+      ? openPersonalSession
+        ? {
+            local_day: localDay(openPersonalSession.started_at, tz), item_id: routineItem.id,
+            started_at: openPersonalSession.started_at, ended_at: null, source,
+            updated_at: openPersonalSession.updated_at, deleted_at: null,
+          } satisfies RoutineLog
+        : existingLog && !existingLog.ended_at
+          ? { ...existingLog, ended_at: existingLog.started_at }
+          : existingLog
+      : existingLog
+    const r = applyRoutineTap(stateLog, now, { local_day: today, item_id: routineItem.id, source }, routineTapOptions(key))
     action = r.action
     let wakeNote = ''
     if (r.changed) {
       upsert('routine_log', r.row)
+      if (key === PERSONAL_WORK_ID) {
+        // Keep the project available even if it was deleted manually; every completed pair is a distinct session.
+        writes.push(db.prepare(ENSURE_PERSONAL_WORK_PROJECT_SQL).bind(arrivedIso, arrivedIso))
+        if (r.action === 'routine_started') {
+          upsert('sessions', {
+            id: crypto.randomUUID(), project_id: PERSONAL_WORK_ID, started_at: r.row.started_at, ended_at: null,
+            local_day: localDay(r.row.started_at, tz), duration_s: null, note: null, source: 'app', ended_by: null,
+            created_at: arrivedIso, updated_at: arrivedIso, deleted_at: null,
+          })
+        } else if (r.action === 'routine_finished' && openPersonalSession && r.row.ended_at) {
+          upsert('sessions', {
+            ...openPersonalSession,
+            ended_at: r.row.ended_at,
+            duration_s: Math.max(0, Math.round((new Date(r.row.ended_at).getTime() - new Date(openPersonalSession.started_at).getTime()) / 1000)),
+            ended_by: 'user', updated_at: arrivedIso, deleted_at: null,
+          })
+        }
+      }
       // The first routine start of the day is the wake signal (you had to get out of bed to tap it).
       if (r.action === 'routine_started' && liveRoutineToday === 0) {
         const woke = applyWake(openAmong([addDays(today, -1), today]), now, 'routine')
@@ -215,6 +256,8 @@ function routineMessage(item: RoutineItem, action: TapAction, row: RoutineLog, h
   switch (action) {
     case 'routine_started':
       return `${item.name} started ${hhmm(row.started_at)}`
+    case 'routine_checked':
+      return `${item.name} checked off`
     case 'routine_finished':
       return `${item.name} done · ${durationText(routineDurationMin(row, item.default_min))}`
     case 'routine_duplicate':

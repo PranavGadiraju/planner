@@ -153,6 +153,9 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at  TEXT NOT NULL,
   deleted_at  TEXT
 );
+INSERT OR IGNORE INTO projects(id, name, kind, color, position, archived_at, created_at, updated_at, deleted_at) VALUES
+  ('personal-work', 'Personal work', 'project', '#a855f7', 1, NULL,
+   strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'), NULL);
 
 CREATE TABLE IF NOT EXISTS sessions (
   id         TEXT PRIMARY KEY,
@@ -194,11 +197,14 @@ CREATE TABLE IF NOT EXISTS routine_items (
   deleted_at     TEXT
 );
 INSERT OR IGNORE INTO routine_items(id, name, icon, position, default_min, chart_category, active, updated_at) VALUES
-  ('shower',    'Shower',           'shower',    1, 15, 'routine', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  ('run',       'Morning run',      'run',       2, 40, 'workout', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  ('stretch',   'Morning stretch',  'stretch',   3, 10, 'routine', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  ('shoulders', 'Shoulder routine', 'shoulders', 4, 10, 'routine', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  ('journal',   'Morning journal',  'journal',   5, 10, 'routine', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+  ('morning-workout', 'Morning workout',   'lift',      1, 45, 'workout', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ('morning-stretch', 'Morning stretch',   'stretch',   2, 10, 'routine', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ('shoulders',       'Shoulder exercise', 'shoulders', 3, 10, 'workout', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ('workday',         'Away at work',       'work',      4,  8 * 60, 'routine', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ('evening-workout', 'Evening workout',   'lift',      5, 45, 'workout', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ('treadmill',       'Walking treadmill', 'run',       6, 30, 'workout', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ('personal-work',   'Personal work',      'work',      7, 50, 'routine', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ('vitamins',        'Vitamins',           'check',     8,  1, 'routine', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
 
 -- First tap of the day starts the item, a second tap >= 3 min later ends it. PK makes double taps idempotent.
 CREATE TABLE IF NOT EXISTS routine_log (
